@@ -1,0 +1,46 @@
+# MQTT Camera Monitoring System Configuration
+
+mqtt:
+  broker_host: "192.168.10.80"
+  broker_port: 1883
+  client_id: "receiver"
+  subscribe_topic: "changeState"
+  publish_topic: "receiver/triggered"
+  keepalive: 60
+  reconnect_delay: 5
+  max_reconnect_attempts: 10
+
+cameras:
+  count: 6
+  resolution_width: 640
+  resolution_height: 480
+  fps: 30
+  buffer_size: 1
+  brightness: 50
+  exposure: 100
+  contrast: 50
+  saturation: 50
+  auto_exposure: true
+
+red_light_detection:
+  # HSV color range for red light detection
+  lower_red_hsv: [0, 50, 50]
+  upper_red_hsv: [10, 255, 255]
+  lower_red_hsv_2: [170, 50, 50]  # Second range for red (wraps around)
+  upper_red_hsv_2: [180, 255, 255]
+  min_contour_area: 100
+  sensitivity: 0.8
+  area_change_threshold: 0.1  # 10% change in total area triggers alert
+  baseline_duration: 1.0      # Duration in seconds to establish baseline
+
+visual_monitor:
+  window_width: 320
+  window_height: 240
+  show_detection_boxes: true
+  box_color: [0, 255, 0]  # Green color for detection boxes
+  box_thickness: 2
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "mqtt_camera_monitoring.log"

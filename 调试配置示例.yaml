@@ -1,0 +1,128 @@
+# MQTT摄像头监控系统 - 调试配置示例
+# 复制此文件为 config.yaml 并根据需要调整参数
+
+mqtt:
+  broker_host: "192.168.10.80"
+  broker_port: 1883
+  client_id: "receiver"
+  subscribe_topic: "changeState"
+  publish_topic: "receiver/triggered"
+  keepalive: 60
+  reconnect_delay: 5
+  max_reconnect_attempts: 10
+
+# 摄像头配置 - 支持每个摄像头独立配置
+cameras:
+  count: 6                    # 固定6个摄像头
+  resolution_width: 640       # 分辨率宽度
+  resolution_height: 480      # 分辨率高度
+  fps: 30                     # 帧率
+  buffer_size: 1
+  
+  # 默认设置（所有摄像头的初始值）
+  default_settings:
+    brightness: 60            # 默认亮度 (0-100)
+    exposure: 120             # 默认曝光时间 (毫秒)
+    contrast: 50              # 默认对比度 (0-100)
+    saturation: 50            # 默认饱和度 (0-100)
+    auto_exposure: false      # 默认曝光模式
+  
+  # 每个摄像头的独立配置（可选，覆盖默认设置）
+  individual_settings:
+    camera_0:
+      brightness: 65          # 摄像头0的亮度
+      exposure: 130           # 摄像头0的曝光
+      # 其他参数使用默认值
+    
+    camera_1:
+      brightness: 55          # 摄像头1的亮度
+      exposure: 110           # 摄像头1的曝光
+      contrast: 60            # 摄像头1的对比度
+    
+    camera_2:
+      brightness: 70          # 摄像头2的亮度
+      exposure: 140           # 摄像头2的曝光
+      auto_exposure: true     # 摄像头2使用自动曝光
+    
+    # camera_3, camera_4, camera_5 使用默认设置
+    # 如需单独配置，按上述格式添加
+
+# 红光检测配置 - 重点调试参数
+red_light_detection:
+  # HSV颜色范围 - 红光检测
+  lower_red_hsv: [0, 50, 50]      # 红色范围1下限
+  upper_red_hsv: [10, 255, 255]   # 红色范围1上限
+  lower_red_hsv_2: [170, 50, 50]  # 红色范围2下限（环绕）
+  upper_red_hsv_2: [180, 255, 255] # 红色范围2上限
+  
+  # === 调试重点：基线建立时间 ===
+  baseline_duration: 0.3      # 检测到changeState变化后的拍摄时长（秒）
+                             # 快速响应：0.2-0.5
+                             # 稳定检测：0.5-1.0
+                             # 精确检测：1.0-2.0
+  
+  # === 调试重点：触发灵敏度 ===
+  area_change_threshold: 0.1  # 面积变化阈值 (10%)
+                             # 高灵敏度：0.05 (5%)
+                             # 中等灵敏度：0.1 (10%)
+                             # 低灵敏度：0.2 (20%)
+  
+  sensitivity: 0.8            # 检测灵敏度 (0.0-1.0)
+                             # 高灵敏度：0.9
+                             # 中等灵敏度：0.8
+                             # 低灵敏度：0.6-0.7
+  
+  min_contour_area: 100       # 最小轮廓面积（像素）
+                             # 检测小目标：50-100
+                             # 过滤噪点：100-200
+                             # 只检测大目标：200+
+
+# 视窗显示配置
+visual_monitor:
+  window_width: 320           # 每个视窗宽度
+  window_height: 240          # 每个视窗高度
+  show_detection_boxes: true  # 显示检测框（调试时建议true）
+  box_color: [0, 255, 0]      # 检测框颜色 [B, G, R] - 绿色
+  box_thickness: 2            # 检测框线条粗细
+
+# 日志配置
+logging:
+  level: "DEBUG"              # 调试时使用DEBUG，正式运行用INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "mqtt_camera_monitoring.log"
+
+# ========================================
+# 常用调试配置组合
+# ========================================
+
+# 1. 环境较暗的调试配置
+# cameras:
+#   brightness: 80
+#   exposure: 200
+#   auto_exposure: false
+
+# 2. 环境较亮的调试配置  
+# cameras:
+#   brightness: 40
+#   exposure: 80
+#   auto_exposure: false
+
+# 3. 快速响应配置
+# red_light_detection:
+#   baseline_duration: 0.2
+#   area_change_threshold: 0.15
+#   sensitivity: 0.8
+
+# 4. 高精度配置
+# red_light_detection:
+#   baseline_duration: 1.0
+#   area_change_threshold: 0.05
+#   sensitivity: 0.9
+#   min_contour_area: 50
+
+# 5. 稳定运行配置（减少误报）
+# red_light_detection:
+#   baseline_duration: 1.5
+#   area_change_threshold: 0.2
+#   sensitivity: 0.7
+#   min_contour_area: 200

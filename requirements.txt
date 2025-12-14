@@ -1,0 +1,19 @@
+# MQTT Communication
+paho-mqtt==1.6.1
+
+# Computer Vision and Image Processing
+opencv-python==4.8.1.78
+numpy==1.24.3
+
+# Testing Frameworks
+pytest==7.4.2
+hypothesis==6.88.1
+
+# Additional Testing Support
+pytest-mock==3.11.1
+
+# Configuration Management
+pyyaml==6.0.1
+
+# Logging
+colorlog==6.7.0
