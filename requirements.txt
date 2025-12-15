@@ -15,5 +15,8 @@ pytest-mock>=3.11.1
 # Configuration Management
 pyyaml==6.0.1
 
+# GUI Framework
+PySide6>=6.5.0
+
 # Logging
 colorlog==6.7.0

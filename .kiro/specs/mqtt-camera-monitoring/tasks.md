@@ -1,172 +1,274 @@
 # Implementation Plan
 
-- [x] 1. Set up project structure and dependencies
-  - Create main project directory structure with separate modules
-  - Set up requirements.txt with necessary Python packages (paho-mqtt, opencv-python, numpy, pytest, hypothesis)
-  - Initialize configuration management for MQTT broker settings
-  - _Requirements: 1.1, 2.1_
+- [x] 1. Create PySide GUI main window structure
 
-- [x] 2. Implement MQTT client component
-  - [x] 2.1 Create MQTT connection and subscription functionality
-    - Implement MQTTClient class with connection to 192.168.10.80
-    - Add subscription to "changeState" topic with client ID "receiver"
-    - Implement connection error handling and logging
-    - _Requirements: 1.1, 1.2, 3.3_
 
-  - [x] 2.2 Implement JSON message parsing and state counting
-    - Add JSON parsing functionality for state messages
-    - Implement counting logic for value "1" in state arrays
-    - Add message update detection by comparing consecutive messages
-    - _Requirements: 1.3, 1.4, 1.5_
 
-  - [ ]* 2.3 Write property test for JSON message parsing
-    - **Property 1: JSON Message Parsing**
-    - **Validates: Requirements 1.3**
 
-  - [ ]* 2.4 Write property test for value counting accuracy
-    - **Property 2: Value Counting Accuracy**
-    - **Validates: Requirements 1.4**
+  - Create main GUI application class with PySide6
+  - Set up main window with left and right panel layout
+  - Initialize basic window properties and styling
+  - _Requirements: 4.1, 5.1_
 
-  - [ ]* 2.5 Write property test for message update detection
-    - **Property 3: Message Update Detection**
-    - **Validates: Requirements 1.5**
+- [x] 2. Implement camera configuration panel (left side)
 
-  - [ ]* 2.6 Write property test for graceful JSON error handling
-    - **Property 8: Graceful JSON Error Handling**
-    - **Validates: Requirements 3.1**
 
-- [x] 3. Implement camera manager component
-  - [x] 3.1 Create USB camera initialization and management
-    - Implement CameraManager class to handle 6 USB cameras
-    - Add camera detection and initialization logic
-    - Create video window display functionality
-    - _Requirements: 2.1, 3.2_
 
-  - [ ] 3.2 Implement camera activation and frame capture with dynamic parameters
-    - Add camera activation triggered by MQTT updates
-    - Implement continuous frame capture from all cameras
-    - Add dynamic camera parameter configuration (brightness, exposure, etc.)
-    - Add frame buffer management and cleanup
-    - _Requirements: 2.2, 2.4, 5.1, 5.2, 5.3_
 
-  - [ ]* 3.3 Write property test for camera failure recovery
-    - **Property 9: Camera Failure Recovery**
-    - **Validates: Requirements 3.2**
 
-  - [ ]* 3.4 Write property test for camera activation on update
-    - **Property 4: Camera Activation on Update**
-    - **Validates: Requirements 2.2**
 
-- [x] 4. Implement red light detection component
-  - [x] 4.1 Create red light detection algorithm
-    - Implement RedLightDetector class with color detection
-    - Add HSV color space conversion for red light detection
-    - Implement contour detection and counting logic
-    - _Requirements: 2.3, 2.4_
+  - [x] 2.1 Create camera configuration widgets
 
-  - [x] 4.2 Implement baseline tracking and comparison with area detection
-    - Add baseline red light count and area storage per camera
-    - Implement 1-second baseline establishment timing
-    - Implement continuous monitoring with count and area comparison
-    - Add decrease/change detection logic for both count and area
-    - _Requirements: 2.3, 2.4, 2.5_
 
-  - [ ]* 4.3 Write property test for baseline count establishment
-    - **Property 5: Baseline Count Establishment**
-    - **Validates: Requirements 2.3**
+    - Add enable/disable checkboxes for each of 6 cameras (Camera 0-5)
+    - Add camera ID selection dropdowns (0-5) for each enabled camera
+    - Add mask file path input fields with file browser buttons for each enabled camera (must be 1920x1080 resolution)
+    - Add baseline red light count input fields for each camera
+    - Add comparison threshold input fields for each camera
+    - Create 6 camera configuration rows with individual controls
+    - _Requirements: 4.2, 3.3_
 
-  - [ ]* 4.4 Write property test for continuous light monitoring
-    - **Property 6: Continuous Light Monitoring**
-    - **Validates: Requirements 2.4**
+  - [x] 2.2 Add system parameter configuration
 
-  - [ ]* 4.5 Write property test for trigger on light decrease
-    - **Property 7: Trigger on Light Decrease**
-    - **Validates: Requirements 2.5**
 
-  - [ ]* 4.6 Write property test for detection error resilience
-    - **Property 11: Detection Error Resilience**
-    - **Validates: Requirements 3.4**
+    - Add delay time input field (default 0.4s) with auto-save to config file
+    - Add comparison threshold input field (default 2) with auto-save to config file
+    - Add monitoring interval input field (default 0.2s) with auto-save to config file
+    - Implement parameter validation and automatic configuration file updates
+    - _Requirements: 3.1, 3.4, 3.5_
 
-- [-] 5. Implement trigger publisher component
-  - [x] 5.1 Create MQTT trigger message publisher
-    - Implement TriggerPublisher class for sending empty messages
-    - Add publishing to "receiver/triggered" topic
-    - Implement message delivery confirmation and retry logic
-    - _Requirements: 2.5, 3.5_
-
-  - [ ]* 5.2 Write property test for message delivery reliability
-    - **Property 12: Message Delivery Reliability**
-    - **Validates: Requirements 3.5**
-
-- [x] 6. Implement visual monitoring component
-  - [x] 6.1 Create visual monitor for camera feeds with detection overlays
-    - Implement VisualMonitor class for displaying all 6 camera feeds
-    - Add green bounding box overlays for detected red lights
-    - Implement real-time display updates with detection status
-    - Add error indicators for failed cameras
-    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
-
-  - [ ]* 6.2 Write property test for baseline timing accuracy
-    - **Property 13: Baseline Timing Accuracy**
-    - **Validates: Requirements 2.3**
-
-  - [ ]* 6.3 Write property test for area change detection
-    - **Property 14: Area Change Detection**
-    - **Validates: Requirements 2.5**
-
-  - [ ]* 6.4 Write property test for visual overlay accuracy
-    - **Property 15: Visual Overlay Accuracy**
+  - [ ]* 2.3 Write property test for GUI configuration elements
+    - **Property 12: GUI Configuration Elements**
     - **Validates: Requirements 4.2**
 
-  - [ ]* 6.5 Write property test for dynamic parameter application
-    - **Property 16: Dynamic Parameter Application**
-    - **Validates: Requirements 5.4**
-
-- [x] 7. Implement main controller and system integration
-  - [x] 7.1 Create main controller class
-    - Implement MainController to coordinate all components
-    - Add system initialization and startup sequence
-    - Implement main event loop for continuous monitoring
-    - _Requirements: 1.1, 2.1, 2.2_
-
-  - [x] 7.2 Integrate MQTT, camera, and visual monitoring components
-    - Connect MQTT message updates to camera activation
-    - Link red light decrease/area change detection to trigger publishing
-    - Integrate visual monitor with detection system
-    - Add proper error handling and system state management
-    - _Requirements: 2.2, 2.5, 4.3, 4.4_
-
-  - [ ]* 7.3 Write property test for MQTT reconnection
-    - **Property 10: MQTT Reconnection**
+  - [ ]* 2.4 Write property test for camera configuration validation
+    - **Property 9: Camera Configuration Validation**
     - **Validates: Requirements 3.3**
 
-- [x] 8. Checkpoint - Ensure core implementation works
+- [x] 3. Implement system status panel (right side)
+
+
+
+
+
+  - [x] 3.1 Create MQTT status display
+
+
+    - Add MQTT connection status indicator
+    - Add last message timestamp display
+    - Add connection information text area
+    - _Requirements: 5.2_
+
+  - [x] 3.2 Create baseline events log
+
+
+    - Add scrollable text area for baseline establishment events
+    - Display timestamp and triggered cameras information
+    - Add automatic scrolling to latest events
+    - _Requirements: 5.3_
+
+  - [x] 3.3 Create trigger events log
+
+
+    - Add scrollable text area for receiver trigger events
+    - Display device ID, timestamp, and camera information
+    - Show baseline count vs trigger count details
+    - _Requirements: 5.4_
+
+  - [x] 3.4 Add system health indicators
+
+
+    - Display number of cameras initialized and enabled
+    - Show monitoring active status
+    - Display last error messages
+    - _Requirements: 5.5_
+
+  - [ ]* 3.5 Write property test for MQTT status updates
+    - **Property 16: MQTT Status Updates**
+    - **Validates: Requirements 5.2**
+
+  - [ ]* 3.6 Write property test for baseline event logging
+    - **Property 17: Baseline Event Logging**
+    - **Validates: Requirements 5.3**
+
+- [x] 4. Implement camera monitoring display
+
+
+
+
+  - [x] 4.1 Create camera status widgets
+
+    - Add baseline red light count display for each of the 6 cameras (show only for enabled cameras)
+    - Add current detection count display for each enabled camera
+    - Add trigger status indicators for each enabled camera
+    - Show "disabled" status for cameras that are not enabled
+    - Update displays in real-time during monitoring
+    - _Requirements: 4.3, 4.4_
+
+  - [ ]* 4.2 Write property test for real-time camera status updates
+    - **Property 13: Real-time Camera Status Updates**
+    - **Validates: Requirements 4.3**
+
+  - [ ]* 4.3 Write property test for real-time monitoring updates
+    - **Property 14: Real-time Monitoring Updates**
+    - **Validates: Requirements 4.4**
+
+- [x] 5. Create GUI wrapper for existing FinalProductionSystem
+
+
+
+
+
+  - [x] 5.1 Implement system integration class
+
+
+    - Create wrapper class that interfaces with existing FinalProductionSystem
+    - Modify existing system to support up to 6 USB cameras instead of current single camera
+    - Ensure cameras use 1920x1080 resolution to match mask files
+    - Add methods to start/stop the existing system with GUI configuration
+    - Implement configuration parameter passing for enabled cameras only
+    - _Requirements: 3.2_
+
+  - [x] 5.2 Add configuration application logic
+
+
+    - Implement dynamic camera enable/disable functionality (only initialize enabled cameras)
+    - Apply individual mask files to each enabled camera
+    - Pass GUI-configured baseline counts and comparison thresholds to each camera
+    - Implement dynamic parameter updates to running system with automatic config file saving
+    - Validate mask file paths and ensure 1920x1080 resolution compatibility
+    - Ensure no additional camera parameters are applied (use cameras directly as in existing system)
+    - _Requirements: 3.2, 6.4_
+
+  - [ ]* 5.3 Write property test for dynamic configuration updates
+    - **Property 8: Dynamic Configuration Updates**
+    - **Validates: Requirements 3.2**
+
+  - [ ]* 5.4 Write property test for configuration change validation
+    - **Property 15: Configuration Change Validation**
+    - **Validates: Requirements 4.5**
+
+- [x] 6. Implement real-time status monitoring
+
+
+
+
+
+  - [x] 6.1 Create status polling mechanism
+
+
+    - Add timer-based polling of existing system status
+    - Extract camera states, MQTT status, and system health
+    - Update GUI displays with current information
+    - _Requirements: 4.4, 5.2_
+
+  - [x] 6.2 Add event logging integration
+
+
+    - Capture baseline establishment events from existing system
+    - Capture trigger events and display in GUI
+    - Implement automatic log scrolling and timestamp formatting
+    - _Requirements: 5.3, 5.4_
+
+  - [ ]* 6.3 Write property test for trigger event logging
+    - **Property 18: Trigger Event Logging**
+    - **Validates: Requirements 5.4**
+
+- [x] 7. Add error handling and validation
+
+
+
+
+
+  - [x] 7.1 Implement input validation
+
+
+    - Validate camera ID ranges (0-5) and prevent duplicate camera ID assignments
+    - Check mask file existence, format, and ensure 1920x1080 resolution for each enabled camera
+    - Validate parameter ranges for delay time, baseline counts, and comparison thresholds
+    - Ensure at least one camera is enabled before starting monitoring
+    - Ensure no camera parameter modifications are applied
+    - _Requirements: 6.4_
+
+  - [x] 7.2 Add error display functionality
+
+
+    - Show error messages in GUI status panel
+    - Display system health indicators
+    - Handle camera initialization failures gracefully
+    - _Requirements: 5.5, 6.2_
+
+  - [ ]* 7.3 Write property test for error display
+    - **Property 19: Error Display**
+    - **Validates: Requirements 5.5**
+
+  - [ ]* 7.4 Write property test for mask file validation
+    - **Property 23: Mask File Validation**
+    - **Validates: Requirements 6.4**
+
+- [x] 8. Create main GUI application entry point
+
+
+
+
+  - [x] 8.1 Implement main GUI application
+
+
+    - Create main.py for GUI application startup
+    - Add command-line options for GUI vs existing system modes
+    - Implement proper application shutdown handling
+    - _Requirements: 4.1, 5.1_
+
+  - [x] 8.2 Add application configuration persistence
+
+
+    - Save GUI configuration to file automatically when parameters change
+    - Load previous configuration on startup
+    - Implement real-time configuration file management (auto-save on parameter changes)
+    - _Requirements: 3.1_
+
+- [x] 9. Checkpoint - Ensure GUI integration works
+
+
+
+
+
   - Ensure all tests pass, ask the user if questions arise.
 
-- [x] 9. Add configuration and logging
-  - [x] 9.1 Implement configuration management
-    - Create configuration file for MQTT broker settings
-    - Add camera configuration options (count, resolution)
-    - Implement red light detection sensitivity settings
-    - _Requirements: 1.1, 2.1_
+- [x] 10. Add comprehensive testing
 
-  - [x] 9.2 Add comprehensive logging system
-    - Implement structured logging for all components
-    - Add error logging for connection failures and camera issues
-    - Create monitoring logs for red light count changes
-    - _Requirements: 3.1, 3.2, 3.4_
 
-- [x] 10. Create main application entry point
-  - [x] 10.1 Implement main application script
-    - Create main.py with command-line interface
-    - Add graceful shutdown handling for cameras and MQTT
-    - Implement signal handling for clean system exit
-    - _Requirements: 1.1, 2.1_
 
-  - [ ]* 10.2 Write integration tests for complete system flow
-    - Test end-to-end message processing and camera triggering
-    - Verify complete workflow from MQTT message to trigger publication
-    - _Requirements: 1.1, 1.2, 2.1, 2.2, 2.5_
 
-- [x] 11. Final checkpoint - Ensure all tests pass
+
+  - [x]* 10.1 Write property test for timing-based baseline trigger
+
+
+    - **Property 2: Timing-Based Baseline Trigger**
+    - **Validates: Requirements 1.4**
+
+
+  - [x]* 10.2 Write property test for threshold-based triggering
+
+    - **Property 5: Threshold-Based Triggering**
+    - **Validates: Requirements 2.3**
+
+  - [x]* 10.3 Write property test for baseline reset on new message
+
+
+    - **Property 6: Baseline Reset on New Message**
+    - **Validates: Requirements 2.4**
+
+  - [x]* 10.4 Write integration tests for GUI and system interaction
+
+
+    - Test complete workflow from GUI configuration to system operation
+    - Verify GUI updates reflect actual system state changes
+    - _Requirements: 1.1, 2.1, 4.1, 5.1_
+
+- [x] 11. Final checkpoint - Ensure complete system works
+
+
+
+
   - Ensure all tests pass, ask the user if questions arise.

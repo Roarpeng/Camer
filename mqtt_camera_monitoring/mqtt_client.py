@@ -33,6 +33,7 @@ class MQTTClient:
         self.logger = logging.getLogger(__name__)
         self.connected = False
         self.last_message_content = None
+        self.last_message_time = None  # Track last message timestamp
         self.message_callback: Optional[Callable[[Dict[str, Any]], None]] = None
         
         # Set up MQTT client callbacks
@@ -207,6 +208,9 @@ class MQTTClient:
             topic = msg.topic
             payload = msg.payload.decode('utf-8')
             
+            # Update last message time for status monitoring
+            self.last_message_time = time.time()
+            
             self.logger.debug(f"Received message on topic {topic}: {payload}")
             
             # Parse JSON message and process
@@ -220,7 +224,7 @@ class MQTTClient:
                     'topic': topic,
                     'payload': parsed_message,
                     'is_update': is_update,
-                    'timestamp': time.time()
+                    'timestamp': self.last_message_time
                 }
                 
                 # Call the message callback if set
