@@ -31,7 +31,7 @@ class CameraState:
 class FinalProductionSystem:
     """最终生产系统"""
     
-    def __init__(self, config_file: str = "config.yaml", mask_file: str = "mask.png", enable_view: bool = False):
+    def __init__(self, config_file: str = "config.yaml", mask_file: str = "fmask.png", enable_view: bool = False):
         # 设置日志
         logging.basicConfig(
             level=logging.INFO,
@@ -95,12 +95,8 @@ class FinalProductionSystem:
     def _detect_red_lights(self, frame: np.ndarray) -> int:
         """检测红色光点数量 - 使用成功的检测逻辑"""
         
-        # 调整mask尺寸匹配摄像头
-        frame_height, frame_width = frame.shape[:2]
+        # 使用标准1920x1080的fmask，无需调整尺寸
         mask_img = self.mask_image
-        
-        if mask_img.shape != (frame_height, frame_width):
-            mask_img = cv2.resize(mask_img, (frame_width, frame_height), interpolation=cv2.INTER_NEAREST)
         
         # 识别光点区域（如果还没有识别过）
         if not self.light_points:
@@ -150,12 +146,8 @@ class FinalProductionSystem:
     def _detect_red_lights_with_visual(self, frame: np.ndarray, camera_id: int) -> tuple[int, np.ndarray]:
         """检测红色光点数量并生成可视化图像"""
         
-        # 调整mask尺寸匹配摄像头
-        frame_height, frame_width = frame.shape[:2]
+        # 使用标准1920x1080的fmask，无需调整尺寸
         mask_img = self.mask_image
-        
-        if mask_img.shape != (frame_height, frame_width):
-            mask_img = cv2.resize(mask_img, (frame_width, frame_height), interpolation=cv2.INTER_NEAREST)
         
         # 识别光点区域（如果还没有识别过）
         if not self.light_points:
@@ -352,7 +344,7 @@ class FinalProductionSystem:
             # 满足条件，建立基线
             self.logger.info("基线建立条件满足，开始建立基线")
             self.mqtt_triggered = True
-            self.baseline_capture_time = time.time() + 0.3  # 延时0.2秒
+            self.baseline_capture_time = time.time() + 0.2  # 延时0.2秒
             
             # 重置所有摄像头状态
             with self.detection_lock:
@@ -658,8 +650,8 @@ def main():
         print("按 Ctrl+C 退出")
     print()
     
-    if not os.path.exists("mask.png"):
-        print("[ERROR] 未找到mask.png文件")
+    if not os.path.exists("fmask.png"):
+        print("[ERROR] 未找到fmask.png文件")
         return 1
     
     system = None
