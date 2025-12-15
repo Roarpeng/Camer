@@ -30,12 +30,33 @@ mqtt-camera-monitoring/
 
 ## Installation
 
-1. Install Python dependencies:
+### Prerequisites
+- Python 3.12 (recommended for best package compatibility)
+- USB cameras (up to 6 supported)
+- MQTT broker access
+
+### Setup
+
+1. **Create and activate virtual environment (Python 3.12):**
 ```bash
+# Using uv (recommended)
+uv venv camer312 --python 3.12
+camer312\Scripts\activate
+
+# Or use the provided activation script
+activate_env.bat
+```
+
+2. **Install Python dependencies:**
+```bash
+# With uv
+uv pip install -r requirements.txt --python camer312\Scripts\python.exe
+
+# Or with pip (after activating environment)
 pip install -r requirements.txt
 ```
 
-2. Install the package in development mode:
+3. **Install the package in development mode:**
 ```bash
 pip install -e .
 ```
@@ -74,7 +95,13 @@ pytest --cov=mqtt_camera_monitoring
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.12+ (3.12 recommended for best package compatibility)
 - USB cameras (up to 6 supported)
 - MQTT broker access
 - OpenCV-compatible camera drivers
+
+## Notes
+
+- **Python Version**: This project uses Python 3.12 due to compatibility issues with newer Python versions (3.14+) and numpy/opencv-python packages
+- **Virtual Environment**: The `camer312` directory contains the Python 3.12 virtual environment
+- **Activation**: Use `activate_env.bat` to quickly activate the correct environment

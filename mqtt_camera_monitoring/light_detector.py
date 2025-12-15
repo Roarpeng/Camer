@@ -53,7 +53,7 @@ class RedLightDetector:
         self.baseline_establishment_start: Optional[float] = None
         self.baseline_established: bool = False
         
-        # HSV color ranges for red detection
+        # HSV color ranges for red detection - more relaxed for better detection
         # Red color wraps around in HSV, so we need two ranges
         self.lower_red_1 = np.array(self.config.lower_red_hsv, dtype=np.uint8)
         self.upper_red_1 = np.array(self.config.upper_red_hsv, dtype=np.uint8)
@@ -66,7 +66,7 @@ class RedLightDetector:
     
     def detect_red_lights(self, frame: np.ndarray) -> RedLightDetection:
         """
-        Count red lights and calculate total area in a single frame
+        Enhanced red light detection with improved precision
         
         Args:
             frame: Input camera frame (BGR format)
@@ -81,42 +81,124 @@ class RedLightDetector:
             raise ValueError("Invalid frame provided for red light detection")
         
         try:
-            # Convert BGR to HSV for better color detection
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            # Pre-processing: Light Gaussian blur to reduce noise
+            blur_kernel = getattr(self.config, 'gaussian_blur_kernel', 3)
+            if blur_kernel > 1:
+                blurred = cv2.GaussianBlur(frame, (blur_kernel, blur_kernel), 0)
+            else:
+                blurred = frame
             
-            # Create masks for both red ranges
+            # Convert BGR to HSV for better color detection
+            hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+            
+            # Create masks for both red ranges - more aggressive detection
             mask1 = cv2.inRange(hsv, self.lower_red_1, self.upper_red_1)
             mask2 = cv2.inRange(hsv, self.lower_red_2, self.upper_red_2)
             
             # Combine masks
             red_mask = cv2.bitwise_or(mask1, mask2)
             
-            # Apply morphological operations to reduce noise
-            kernel = np.ones((3, 3), np.uint8)
-            red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, kernel)
-            red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, kernel)
+            # Very relaxed brightness filtering to catch dim red lights
+            brightness_threshold = getattr(self.config, 'brightness_threshold', 50)
+            if brightness_threshold > 0:
+                brightness_mask = hsv[:, :, 2] > brightness_threshold
+                red_mask = cv2.bitwise_and(red_mask, brightness_mask.astype(np.uint8) * 255)
             
-            # Find contours
-            contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # 适度的红色检测 - 平衡检测和精度
             
-            # Filter contours by minimum area and calculate properties
+            # 1. 主要使用HSV检测
+            primary_mask = red_mask
+            
+            # 2. 红色通道优势检测 - 适中的条件
+            b, g, r = cv2.split(blurred)
+            # 红色通道大于蓝绿通道
+            red_dominant = (r > g + 15) & (r > b + 15) & (r > 40)
+            red_channel_mask = red_dominant.astype(np.uint8) * 255
+            
+            # 3. 组合检测结果 - 使用OR保持检测能力
+            red_mask = cv2.bitwise_or(primary_mask, red_channel_mask)
+            
+            # Minimal morphological operations to preserve small red lights
+            morph_kernel_size = getattr(self.config, 'morphology_kernel', 1)
+            if morph_kernel_size > 0:
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morph_kernel_size, morph_kernel_size))
+                # Only remove very small noise
+                red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+            
+            # Optional erosion - very conservative to preserve detection
+            erosion_kernel_size = getattr(self.config, 'erosion_kernel', 1)
+            erosion_iterations = getattr(self.config, 'erosion_iterations', 0)
+            if erosion_iterations > 0 and erosion_kernel_size > 0:
+                erosion_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (erosion_kernel_size, erosion_kernel_size))
+                red_mask = cv2.erode(red_mask, erosion_kernel, iterations=erosion_iterations)
+            
+            # Find contours with hierarchy for better filtering
+            contours, hierarchy = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # 适度的轮廓过滤 - 平衡检测和精度
             valid_contours = []
             bounding_boxes = []
             total_area = 0.0
             
+            min_area = self.config.min_contour_area
+            max_area = getattr(self.config, 'max_contour_area', 80000)
+            
             for contour in contours:
                 area = cv2.contourArea(contour)
-                if area >= self.config.min_contour_area:
-                    valid_contours.append(contour)
-                    total_area += area
+                
+                # 基本面积过滤
+                if area < min_area or area > max_area:
+                    continue
+                
+                # 获取边界框
+                x, y, w, h = cv2.boundingRect(contour)
+                
+                # 适度的形状检查
+                if w > 0 and h > 0:
+                    aspect_ratio = float(w) / h
+                    # 放宽长宽比限制
+                    if aspect_ratio < 0.2 or aspect_ratio > 5.0:
+                        continue
                     
-                    # Get bounding box
-                    x, y, w, h = cv2.boundingRect(contour)
-                    bounding_boxes.append((x, y, w, h))
+                    # 简化的紧凑性检查
+                    bbox_area = w * h
+                    compactness = area / bbox_area if bbox_area > 0 else 0
+                    if compactness < 0.2:  # 放宽紧凑性要求
+                        continue
+                
+                valid_contours.append(contour)
+                total_area += area
+                bounding_boxes.append((x, y, w, h))
             
             count = len(valid_contours)
             
-            self.logger.debug(f"Detected {count} red lights with total area {total_area:.2f}")
+            # Debug information for troubleshooting
+            total_contours = len(contours)
+            self.logger.debug(f"Detection stats: {total_contours} total contours -> {count} valid red lights, total area {total_area:.2f}")
+            
+            # Log detection parameters occasionally for verification
+            if hasattr(self, '_debug_counter'):
+                self._debug_counter += 1
+            else:
+                self._debug_counter = 1
+            
+            if self._debug_counter % 25 == 1:  # Every 25 detections - more frequent
+                self.logger.info(f"Enhanced detection: {count} red lights found from {total_contours} contours")
+                self.logger.info(f"Detection params: HSV1({self.lower_red_1}-{self.upper_red_1}), "
+                               f"HSV2({self.lower_red_2}-{self.upper_red_2}), "
+                               f"brightness_thresh={brightness_threshold}, min_area={min_area}")
+                
+                # 如果没有检测到红光，输出更多调试信息
+                if count == 0:
+                    self.logger.warning(f"No red lights detected! Frame shape: {frame.shape}, "
+                                      f"Total contours before filtering: {total_contours}")
+                    # 输出HSV统计信息
+                    hsv_stats = {
+                        'h_min': np.min(hsv[:,:,0]), 'h_max': np.max(hsv[:,:,0]),
+                        's_min': np.min(hsv[:,:,1]), 's_max': np.max(hsv[:,:,1]),
+                        'v_min': np.min(hsv[:,:,2]), 'v_max': np.max(hsv[:,:,2])
+                    }
+                    self.logger.info(f"HSV stats: {hsv_stats}")
             
             return RedLightDetection(
                 count=count,

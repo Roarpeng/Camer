@@ -281,7 +281,7 @@ class CameraManager:
     
     def _capture_loop(self, camera_id: int) -> None:
         """
-        Continuous capture loop for a single camera with enhanced error handling
+        Enhanced capture loop with better error handling and reconnection
         
         Args:
             camera_id: Camera identifier
@@ -291,17 +291,38 @@ class CameraManager:
             self.logger.error(f"Camera {camera_id} is None, cannot start capture loop")
             return
         
-        self.logger.debug(f"Starting capture loop for camera {camera_id}")
+        self.logger.debug(f"Starting enhanced capture loop for camera {camera_id}")
         consecutive_failures = 0
-        max_consecutive_failures = 10
+        max_consecutive_failures = 5  # Reduced from 10
+        reconnect_attempts = 0
+        max_reconnect_attempts = 3
         
         while self.capture_active:
             try:
+                # Check if camera is still valid
+                if cap is None or not cap.isOpened():
+                    self.logger.warning(f"Camera {camera_id} is not opened, attempting to reconnect...")
+                    
+                    if reconnect_attempts < max_reconnect_attempts:
+                        if self._reconnect_camera(camera_id):
+                            reconnect_attempts = 0
+                            consecutive_failures = 0
+                            cap = self.cameras[camera_id]
+                        else:
+                            reconnect_attempts += 1
+                            time.sleep(2.0)  # Wait before retry
+                            continue
+                    else:
+                        self.logger.error(f"Camera {camera_id} failed to reconnect after {max_reconnect_attempts} attempts")
+                        self.active_cameras[camera_id] = False
+                        break
+                
                 ret, frame = cap.read()
                 
                 if ret and frame is not None:
-                    # Reset failure counter on successful capture
+                    # Reset failure counters on successful capture
                     consecutive_failures = 0
+                    reconnect_attempts = 0
                     
                     camera_frame = CameraFrame(
                         camera_id=camera_id,
@@ -325,28 +346,37 @@ class CameraManager:
                 
                 else:
                     consecutive_failures += 1
-                    self.logger.warning(f"Failed to capture frame from camera {camera_id} (failure {consecutive_failures}/{max_consecutive_failures})")
                     
-                    # Create invalid frame placeholder
+                    # Reduce log frequency to prevent spam
+                    if consecutive_failures % 10 == 1:  # Log every 10th failure
+                        self.logger.warning(f"Camera {camera_id} capture failed (attempt {consecutive_failures})")
+                    
+                    # Set frame to None instead of creating invalid frame
                     with self.frames_lock:
-                        if camera_id < len(self.current_frames):
-                            # Clean up previous frame
-                            if (self.current_frames[camera_id] and 
-                                self.current_frames[camera_id].frame is not None):
-                                del self.current_frames[camera_id].frame
-                            
-                            self.current_frames[camera_id] = CameraFrame(
-                                camera_id=camera_id,
-                                frame=np.zeros((self.config.resolution_height, self.config.resolution_width, 3), dtype=np.uint8),
-                                timestamp=time.time(),
-                                is_valid=False
-                            )
+                        while len(self.current_frames) <= camera_id:
+                            self.current_frames.append(None)
+                        
+                        # Clean up previous frame
+                        if (camera_id < len(self.current_frames) and 
+                            self.current_frames[camera_id] and 
+                            self.current_frames[camera_id].frame is not None):
+                            del self.current_frames[camera_id].frame
+                        
+                        # Set to None to indicate disconnection
+                        self.current_frames[camera_id] = None
                     
-                    # If too many consecutive failures, mark camera as inactive
+                    # Try to reconnect after consecutive failures
                     if consecutive_failures >= max_consecutive_failures:
-                        self.logger.error(f"Camera {camera_id} has failed {consecutive_failures} times, marking as inactive")
-                        self.active_cameras[camera_id] = False
-                        break
+                        self.logger.warning(f"Camera {camera_id} has {consecutive_failures} consecutive failures, attempting reconnect...")
+                        if self._reconnect_camera(camera_id):
+                            consecutive_failures = 0
+                            cap = self.cameras[camera_id]
+                        else:
+                            reconnect_attempts += 1
+                            if reconnect_attempts >= max_reconnect_attempts:
+                                self.logger.error(f"Camera {camera_id} failed to reconnect, marking as inactive")
+                                self.active_cameras[camera_id] = False
+                                break
                 
                 # Adaptive delay based on FPS configuration
                 frame_delay = 1.0 / max(self.config.fps, 1)
@@ -364,6 +394,49 @@ class CameraManager:
                 time.sleep(0.1)  # Brief pause before retrying
         
         self.logger.debug(f"Capture loop ended for camera {camera_id}")
+    
+    def _reconnect_camera(self, camera_id: int) -> bool:
+        """
+        Attempt to reconnect a camera
+        
+        Args:
+            camera_id: Camera identifier
+            
+        Returns:
+            bool: True if reconnection successful, False otherwise
+        """
+        try:
+            # Release old camera object
+            if self.cameras[camera_id] is not None:
+                self.cameras[camera_id].release()
+                time.sleep(0.5)  # Wait for release to complete
+            
+            # Create new camera object
+            cap = cv2.VideoCapture(camera_id)
+            
+            if not cap.isOpened():
+                cap.release()
+                return False
+            
+            # Set camera parameters
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.resolution_width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.config.resolution_height)
+            cap.set(cv2.CAP_PROP_FPS, self.config.fps)
+            
+            # Test read
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                cap.release()
+                return False
+            
+            # Update camera object
+            self.cameras[camera_id] = cap
+            self.logger.info(f"Successfully reconnected camera {camera_id}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to reconnect camera {camera_id}: {e}")
+            return False
     
     def get_frames(self) -> List[Optional[CameraFrame]]:
         """

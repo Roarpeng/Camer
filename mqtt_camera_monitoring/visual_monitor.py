@@ -57,6 +57,34 @@ class LogEntry:
     details: Optional[Dict[str, Any]] = None
 
 
+class ErrorThrottler:
+    """Error log throttler to prevent spam"""
+    
+    def __init__(self, max_errors_per_minute: int = 3):
+        self.max_errors_per_minute = max_errors_per_minute
+        self.error_timestamps: Dict[str, List[float]] = {}
+    
+    def should_log_error(self, error_key: str) -> bool:
+        """Check if error should be logged"""
+        current_time = time.time()
+        
+        if error_key not in self.error_timestamps:
+            self.error_timestamps[error_key] = []
+        
+        # Clean up timestamps older than 1 minute
+        self.error_timestamps[error_key] = [
+            ts for ts in self.error_timestamps[error_key] 
+            if current_time - ts < 60
+        ]
+        
+        # Check if under limit
+        if len(self.error_timestamps[error_key]) < self.max_errors_per_minute:
+            self.error_timestamps[error_key].append(current_time)
+            return True
+        
+        return False
+
+
 class EnhancedVisualMonitor:
     """Enhanced visual monitor with 6 independent camera windows and real-time log display"""
     
@@ -96,6 +124,11 @@ class EnhancedVisualMonitor:
         self.error_font = cv2.FONT_HERSHEY_SIMPLEX
         self.error_font_scale = 0.7
         self.error_color = (0, 0, 255)  # Red color for errors
+        
+        # Error throttling
+        self.error_throttler = ErrorThrottler(max_errors_per_minute=3)
+        self.last_error_display: Dict[int, float] = {}
+        self.error_display_interval = 5.0  # 5 seconds between error displays per camera
         
         # Initialize camera settings
         self._initialize_camera_settings()
@@ -632,28 +665,40 @@ class EnhancedVisualMonitor:
                         if frame and frame.is_valid and frame.frame is not None:
                             display_frame = self._create_display_frame(frame, detection)
                             window.error_message = None
+                            
+                            # Update window
+                            cv2.imshow(window.window_name, display_frame)
+                            window.last_update = current_time
                         else:
-                            # Create error frame
-                            error_msg = "Camera disconnected" if frame is None else "Invalid frame"
-                            display_frame = self._create_error_frame(camera_id, error_msg)
-                            window.error_message = error_msg
-                        
-                        # Update window
-                        cv2.imshow(window.window_name, display_frame)
-                        window.last_update = current_time
+                            # Use throttled error display
+                            last_error_time = self.last_error_display.get(camera_id, 0)
+                            if current_time - last_error_time >= self.error_display_interval:
+                                error_msg = "Camera disconnected" if frame is None else "Invalid frame"
+                                self.show_error(camera_id, error_msg)
+                            # If too frequent, keep the previous frame display
                         
                     except Exception as e:
-                        self.logger.error(f"Error updating display for camera {camera_id}: {e}")
-                        error_frame = self._create_error_frame(camera_id, f"Display error: {str(e)}")
-                        cv2.imshow(window.window_name, error_frame)
-                        window.error_message = str(e)
+                        # Throttle display update errors
+                        error_key = f"display_update_camera_{camera_id}"
+                        if self.error_throttler.should_log_error(error_key):
+                            self.logger.error(f"Error updating display for camera {camera_id}: {e}")
+                        
+                        # Still try to show error frame, but throttled
+                        last_error_time = self.last_error_display.get(camera_id, 0)
+                        if current_time - last_error_time >= self.error_display_interval:
+                            error_frame = self._create_error_frame(camera_id, f"Display error")
+                            cv2.imshow(window.window_name, error_frame)
+                            window.error_message = str(e)
+                            self.last_error_display[camera_id] = current_time
                 
-                # Process window events
+                # Process window events (reduced frequency)
                 cv2.waitKey(1)
                 return True
                 
         except Exception as e:
-            self.logger.error(f"Error updating display: {e}")
+            # Throttle general display update errors
+            if self.error_throttler.should_log_error("display_update_general"):
+                self.logger.error(f"Error updating display: {e}")
             return False
     
     def update_camera_detection_data(self, camera_id: int, baseline_count: int = 0, 
@@ -924,7 +969,7 @@ class EnhancedVisualMonitor:
     
     def show_error(self, camera_id: int, error_msg: str) -> bool:
         """
-        Display error indicator for failed camera
+        Display error indicator for failed camera with throttling
         
         Args:
             camera_id: Camera identifier
@@ -936,6 +981,17 @@ class EnhancedVisualMonitor:
         if not self.display_active or camera_id >= len(self.windows):
             return False
         
+        current_time = time.time()
+        error_key = f"camera_{camera_id}_{error_msg}"
+        
+        # Check if we should display this error (throttle frequency)
+        last_display = self.last_error_display.get(camera_id, 0)
+        if current_time - last_display < self.error_display_interval:
+            return False  # Too frequent, skip display
+        
+        # Check if we should log this error
+        should_log = self.error_throttler.should_log_error(error_key)
+        
         try:
             with self.display_lock:
                 window = self.windows[camera_id]
@@ -946,11 +1002,18 @@ class EnhancedVisualMonitor:
                 cv2.imshow(window.window_name, error_frame)
                 cv2.waitKey(1)
                 
-                self.logger.warning(f"Error displayed for camera {camera_id}: {error_msg}")
+                self.last_error_display[camera_id] = current_time
+                
+                # Only log if throttler allows it
+                if should_log:
+                    self.logger.warning(f"Error displayed for camera {camera_id}: {error_msg}")
+                
                 return True
                 
         except Exception as e:
-            self.logger.error(f"Error showing error for camera {camera_id}: {e}")
+            # Only log this error if throttler allows it
+            if should_log:
+                self.logger.error(f"Error showing error for camera {camera_id}: {e}")
             return False
     
     def update_single_camera(self, camera_id: int, frame: Optional[CameraFrame], 

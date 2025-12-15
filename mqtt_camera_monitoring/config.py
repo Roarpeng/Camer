@@ -47,6 +47,8 @@ class CameraConfig:
     contrast: int    # Default contrast
     saturation: int  # Default saturation
     auto_exposure: bool  # Default auto exposure
+    gain: int = 0
+    white_balance: int = 4000
     individual_settings: Dict[str, IndividualCameraConfig] = None
     
     def get_camera_config(self, camera_id: int) -> IndividualCameraConfig:
@@ -82,9 +84,16 @@ class RedLightDetectionConfig:
     lower_red_hsv_2: List[int]
     upper_red_hsv_2: List[int]
     min_contour_area: int
-    sensitivity: float
-    area_change_threshold: float
-    baseline_duration: float
+    max_contour_area: int = 50000
+    sensitivity: float = 0.9
+    area_change_threshold: float = 0.1
+    baseline_duration: float = 1.0
+    gaussian_blur_kernel: int = 5
+    morphology_kernel: int = 3
+    brightness_threshold: int = 200
+    erosion_kernel: int = 2
+    erosion_iterations: int = 1
+    count_decrease_threshold: int = 3  # 红光数量减少阈值
 
 
 @dataclass

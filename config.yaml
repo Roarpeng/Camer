@@ -11,28 +11,36 @@ mqtt:
   max_reconnect_attempts: 10
 
 cameras:
-  count: 6
+  count: 1
   resolution_width: 640
   resolution_height: 480
   fps: 30
   buffer_size: 1
-  brightness: 50
-  exposure: 100
-  contrast: 50
-  saturation: 50
-  auto_exposure: true
+  brightness: 60
+  exposure: -4
+  contrast: 60
+  saturation: 80
+  auto_exposure: false
+  gain: 50
+  white_balance: 4000
 
 red_light_detection:
-  # HSV color range for red light detection
-  lower_red_hsv: [0, 50, 50]
-  upper_red_hsv: [10, 255, 255]
-  lower_red_hsv_2: [170, 50, 50]  # Second range for red (wraps around)
+  # HSV color range for red light detection 
+  lower_red_hsv: [0, 25, 25]
+  upper_red_hsv: [18, 255, 255]
+  lower_red_hsv_2: [160, 25, 25]  # Second range for red (wraps around)
   upper_red_hsv_2: [180, 255, 255]
-  min_contour_area: 100
-  sensitivity: 0.8
+  min_contour_area: 3
+  max_contour_area: 80000
+  sensitivity: 0.85
   area_change_threshold: 0.1  # 10% change in total area triggers alert
   baseline_duration: 1.0      # Duration in seconds to establish baseline
-
+  brightness_threshold: 30    
+  erosion_iterations: 0      
+  erosion_kernel: 1
+  gaussian_blur_kernel: 1     
+  morphology_kernel: 1
+  count_decrease_threshold: 3
 visual_monitor:
   window_width: 320
   window_height: 240

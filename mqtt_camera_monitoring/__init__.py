@@ -13,7 +13,7 @@ from .mqtt_client import MQTTClient
 from .camera_manager import CameraManager
 from .light_detector import RedLightDetector
 from .trigger_publisher import TriggerPublisher
-from .visual_monitor import VisualMonitor
+from .lightweight_monitor import LightweightVisualMonitor as VisualMonitor
 from .main_controller import MainController
 from .config import ConfigManager, SystemConfig
 
