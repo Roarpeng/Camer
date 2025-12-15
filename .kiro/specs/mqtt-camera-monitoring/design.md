@@ -2,30 +2,30 @@
 
 ## Overview
 
-The MQTT Camera Monitoring System is a Python-based application that integrates MQTT messaging with USB camera monitoring. The system connects to an MQTT broker to receive state change messages, processes JSON payloads to count specific values, and controls multiple USB cameras to monitor red light changes in real-time.
+The MQTT Camera Monitoring System is a Python-based application with PySide GUI that integrates MQTT messaging with configurable USB camera monitoring. The system connects to an MQTT broker to receive state change messages, implements enhanced timing logic for baseline establishment, and monitors up to 6 cameras using individual mask regions. The system provides real-time configuration and monitoring through a graphical interface.
 
 ## Architecture
 
-The system follows a modular architecture with clear separation of concerns:
+The system follows a modular architecture with GUI-driven configuration and real-time monitoring:
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   MQTT Client   │    │  Camera Manager │    │ Light Detector  │
+│   PySide GUI    │    │   MQTT Client   │    │  Camera Manager │
 │                 │    │                 │    │                 │
-│ - Connect       │    │ - Initialize    │    │ - Count lights  │
-│ - Subscribe     │    │ - Capture       │    │ - Compare       │
-│ - Parse JSON    │    │ - Display       │    │ - Detect change │
+│ - Config Panel  │    │ - Connect       │    │ - Initialize    │
+│ - Status Panel  │    │ - Subscribe     │    │ - Mask Support  │
+│ - Real-time UI  │    │ - Timing Logic  │    │ - Multi-camera  │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          └───────────────────────┼───────────────────────┘
                                  │
-                    ┌─────────────────┐
-                    │ Main Controller │
-                    │                 │
-                    │ - Coordinate    │
-                    │ - Event loop    │
-                    │ - Error handle  │
-                    └─────────────────┘
+                    ┌─────────────────┐    ┌─────────────────┐
+                    │ Main Controller │    │ Light Detector  │
+                    │                 │    │                 │
+                    │ - Coordinate    │    │ - Masked Region │
+                    │ - Config Mgmt   │    │ - Baseline Comp │
+                    │ - Event Loop    │    │ - 0.2s Monitor  │
+                    └─────────────────┘    └─────────────────┘
 ```
 
 ## Components and Interfaces
