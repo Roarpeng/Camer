@@ -142,10 +142,10 @@ class AsyncCameraManager:
                 self.logger.warning(f"Camera {camera_id} could not be opened")
                 return False, None
             
-            # 快速配置基本参数
+            # 快速配置基本参数 - 使用分辨率匹配mask (1280x720)
             try:
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 cap.set(cv2.CAP_PROP_FPS, 30)
                 

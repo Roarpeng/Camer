@@ -1,0 +1,66 @@
+cameras:
+  auto_exposure: false
+  brightness: 80
+  buffer_size: 1
+  contrast: 85
+  count: 1
+  exposure: -5
+  fps: 30
+  gain: 80
+  resolution_height: 1080
+  resolution_width: 1920
+  saturation: 80
+  white_balance: 4000
+logging:
+  file: mqtt_camera_monitoring.log
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  level: INFO
+mqtt:
+  broker_host: 192.168.10.80
+  broker_port: 1883
+  client_id: receiver
+  keepalive: 60
+  max_reconnect_attempts: 10
+  publish_topic: receiver/triggered
+  reconnect_delay: 5
+  subscribe_topic: changeState
+red_light_detection:
+  area_change_threshold: 0.1
+  area_decrease_threshold: 0
+  baseline_duration: 1.0
+  brightness_threshold: 30
+  count_decrease_threshold: 1
+  erosion_iterations: 0
+  erosion_kernel: 1
+  exclude_ones_count: 144
+  gaussian_blur_kernel: 1
+  lower_red_hsv:
+  - 0
+  - 25
+  - 25
+  lower_red_hsv_2:
+  - 160
+  - 25
+  - 25
+  max_contour_area: 80000
+  min_contour_area: 3
+  morphology_kernel: 1
+  require_content_update: true
+  sensitivity: 0.85
+  upper_red_hsv:
+  - 18
+  - 255
+  - 255
+  upper_red_hsv_2:
+  - 180
+  - 255
+  - 255
+visual_monitor:
+  box_color:
+  - 0
+  - 255
+  - 0
+  box_thickness: 2
+  show_detection_boxes: true
+  window_height: 240
+  window_width: 320

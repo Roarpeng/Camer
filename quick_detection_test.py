@@ -25,12 +25,12 @@ def quick_test_camera(camera_id: int):
     
     cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
     if not cap.isOpened():
-        print("❌ 无法打开")
+        print("[ERROR] 无法打开")
         return False, 0
     
-    # 配置摄像头
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # 配置摄像头 - 使用分辨率匹配mask (1280x720)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
     cap.set(cv2.CAP_PROP_EXPOSURE, -4)
@@ -42,7 +42,7 @@ def quick_test_camera(camera_id: int):
     for _ in range(3):
         ret, frame = cap.read()
         if not ret:
-            print("❌ 无法读取帧")
+            print("[ERROR] 无法读取帧")
             cap.release()
             return False, 0
     
@@ -69,17 +69,17 @@ def quick_test_camera(camera_id: int):
             non_zero = len([x for x in detection_counts if x > 0])
             
             if max_count > 0:
-                print(f"✅ 检测到红光 (平均: {avg_count:.1f}, 最大: {max_count}, 检出率: {non_zero}/10)")
+                print(f"[OK] 检测到红光 (平均: {avg_count:.1f}, 最大: {max_count}, 检出率: {non_zero}/10)")
                 return True, avg_count
             else:
                 print(f"⚠️  未检测到红光 (测试了10帧)")
                 return False, 0
         else:
-            print("❌ 检测失败")
+            print("[ERROR] 检测失败")
             return False, 0
             
     except Exception as e:
-        print(f"❌ 错误: {e}")
+        print(f"[ERROR] 错误: {e}")
         cap.release()
         return False, 0
 
@@ -106,12 +106,12 @@ def main():
     print(f"  工作的摄像头: {working_cameras}")
     
     if working_cameras:
-        print("✅ 检测算法工作正常！")
+        print("[OK] 检测算法工作正常！")
         for camera_id in working_cameras:
             print(f"  摄像头 {camera_id}: 平均检测 {detection_results[camera_id]:.1f} 个红光")
         print("\n建议运行完整测试: run_ultra_sensitive_test.bat")
     else:
-        print("❌ 所有摄像头都未检测到红光")
+        print("[ERROR] 所有摄像头都未检测到红光")
         print("可能原因:")
         print("  1. 没有红色光源")
         print("  2. 检测参数需要进一步调整")

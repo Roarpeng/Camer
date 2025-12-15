@@ -19,8 +19,8 @@ def debug_detection(camera_id=1):
         print(f"无法打开摄像头 {camera_id}")
         return
     
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
     cap.set(cv2.CAP_PROP_EXPOSURE, config.cameras.exposure)
     cap.set(cv2.CAP_PROP_BRIGHTNESS, config.cameras.brightness / 100.0)

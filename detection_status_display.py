@@ -65,9 +65,9 @@ class DetectionStatusDisplay:
                     self.camera_status[camera_id] = CameraStatus(camera_id, False)
                     continue
                 
-                # 配置摄像头
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                # 配置摄像头 - 使用分辨率匹配mask (1280x720)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 
                 # 测试帧捕获

@@ -1,0 +1,7 @@
+# 红色检测参数
+# 范围1
+red_hsv_lower1 = np.array([0, 30, 30])
+red_hsv_upper1 = np.array([25, 255, 255])
+# 范围2
+red_hsv_lower2 = np.array([155, 30, 30])
+red_hsv_upper2 = np.array([180, 255, 255])

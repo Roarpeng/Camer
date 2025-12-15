@@ -93,7 +93,10 @@ class RedLightDetectionConfig:
     brightness_threshold: int = 200
     erosion_kernel: int = 2
     erosion_iterations: int = 1
-    count_decrease_threshold: int = 3  # 红光数量减少阈值
+    count_decrease_threshold: int = 3  # 红光数量减少阈值 (已弃用)
+    area_decrease_threshold: float = 0.15  # 红光面积减少阈值 (15%)
+    exclude_ones_count: int = 144      # 排除的ones数量
+    require_content_update: bool = True # 只有内容更新时才建立基线
 
 
 @dataclass

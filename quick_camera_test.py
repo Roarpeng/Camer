@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""
+快速摄像头测试
+快速验证摄像头是否能正常工作
+"""
+
+import cv2
+import numpy as np
+import time
+
+def quick_camera_test():
+    """快速摄像头测试"""
+    
+    print("=== 快速摄像头测试 ===")
+    print("快速验证摄像头是否能正常工作")
+    print()
+    
+    # 测试多个摄像头
+    for camera_id in range(5):
+        print(f"--- 测试摄像头 {camera_id} ---")
+        
+        # 尝试不同后端
+        backends = [
+            (cv2.CAP_DSHOW, "DirectShow"),
+            (cv2.CAP_MSMF, "Media Foundation"),
+            (cv2.CAP_ANY, "Any")
+        ]
+        
+        success = False
+        
+        for backend, name in backends:
+            print(f"尝试 {name} 后端...", end=" ")
+            
+            try:
+                cap = cv2.VideoCapture(camera_id, backend)
+                
+                if cap.isOpened():
+                    # 基本配置
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)  # 确保彩色模式
+                    
+                    # 尝试多种曝光设置 - 扩展到更高值
+                    exposure_values = [10, 8, 6, 5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5, -6]
+                    
+                    # 首先尝试自动曝光
+                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # 启用自动曝光
+                    cap.set(cv2.CAP_PROP_BRIGHTNESS, 1.0)  # 最高亮度
+                    cap.set(cv2.CAP_PROP_CONTRAST, 1.0)    # 最高对比度
+                    cap.set(cv2.CAP_PROP_SATURATION, 0.8)
+                    
+                    # 尝试设置增益
+                    try:
+                        cap.set(cv2.CAP_PROP_GAIN, 100)
+                    except:
+                        pass
+                    
+                    time.sleep(0.5)
+                    
+                    # 测试自动曝光
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        avg_brightness = np.mean(frame)
+                        if avg_brightness > 10:
+                            print(f"自动曝光: 亮度{avg_brightness:.1f} ✓ 成功")
+                            filename = f"quick_test_cam{camera_id}_{name.replace(' ', '')}_auto.jpg"
+                            cv2.imwrite(filename, frame)
+                            success = True
+                            break
+                    
+                    # 如果自动曝光失败，尝试手动曝光
+                    for exposure in exposure_values:
+                        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # 禁用自动曝光
+                        cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
+                        cap.set(cv2.CAP_PROP_BRIGHTNESS, 1.0)  # 最高亮度
+                        cap.set(cv2.CAP_PROP_CONTRAST, 1.0)    # 最高对比度
+                        cap.set(cv2.CAP_PROP_SATURATION, 0.8)
+                        
+                        # 等待设置生效
+                        time.sleep(0.3)
+                        
+                        # 测试帧捕获
+                        for attempt in range(3):
+                            ret, frame = cap.read()
+                            
+                            if ret and frame is not None:
+                                avg_brightness = np.mean(frame)
+                                max_brightness = np.max(frame)
+                                
+                                print(f"曝光{exposure}: 亮度{avg_brightness:.1f}/{max_brightness}", end=" ")
+                                
+                                # 保存测试图像
+                                filename = f"quick_test_cam{camera_id}_{name.replace(' ', '')}_exp{exposure}.jpg"
+                                cv2.imwrite(filename, frame)
+                                
+                                if avg_brightness > 5:  # 不是全黑
+                                    print(f"✓ 成功 - 保存: {filename}")
+                                    success = True
+                                    
+                                    # 显示图像信息
+                                    print(f"    分辨率: {frame.shape}")
+                                    print(f"    亮度统计: 平均={avg_brightness:.1f}, 最大={max_brightness}, 最小={np.min(frame)}")
+                                    
+                                    # 检查是否有颜色信息
+                                    if len(frame.shape) == 3:
+                                        b_avg = np.mean(frame[:,:,0])
+                                        g_avg = np.mean(frame[:,:,1])
+                                        r_avg = np.mean(frame[:,:,2])
+                                        print(f"    BGR平均: B={b_avg:.1f}, G={g_avg:.1f}, R={r_avg:.1f}")
+                                    
+                                    break
+                                else:
+                                    print(f"✗ 图像过暗")
+                            else:
+                                print(f"✗ 无法捕获帧")
+                            
+                            time.sleep(0.1)
+                        
+                        if success:
+                            break
+                    
+                    cap.release()
+                    
+                    if success:
+                        print(f"摄像头 {camera_id} 使用 {name} 后端工作正常")
+                        break
+                    else:
+                        print(f"所有曝光值都失败")
+                else:
+                    print("✗ 无法打开")
+                    
+            except Exception as e:
+                print(f"✗ 错误: {e}")
+        
+        if not success:
+            print(f"摄像头 {camera_id}: 所有后端都失败")
+        
+        print()
+    
+    print("=== 测试完成 ===")
+    print("请检查生成的图像文件:")
+    print("- quick_test_cam*.jpg: 各摄像头的测试图像")
+    print()
+    print("如果所有图像都是黑色，可能的原因:")
+    print("1. 摄像头被其他程序占用")
+    print("2. 摄像头驱动问题")
+    print("3. 摄像头硬件故障")
+    print("4. 环境光线不足")
+
+if __name__ == "__main__":
+    quick_camera_test()

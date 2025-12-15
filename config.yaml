@@ -16,12 +16,12 @@ cameras:
   resolution_height: 480
   fps: 30
   buffer_size: 1
-  brightness: 60
-  exposure: -4
-  contrast: 60
+  brightness: 80
+  exposure: -5
+  contrast: 85
   saturation: 80
   auto_exposure: false
-  gain: 50
+  gain: 80
   white_balance: 4000
 
 red_light_detection:
@@ -40,7 +40,10 @@ red_light_detection:
   erosion_kernel: 1
   gaussian_blur_kernel: 1     
   morphology_kernel: 1
-  count_decrease_threshold: 3
+  count_decrease_threshold: 1
+  area_decrease_threshold: 0
+  exclude_ones_count: 144     
+  require_content_update: true 
 visual_monitor:
   window_width: 320
   window_height: 240
