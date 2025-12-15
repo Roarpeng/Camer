@@ -23,6 +23,16 @@ except ImportError:
     # Fallback if detector is not available
     USBCameraDetector = None
 
+# Import path utilities for PyInstaller compatibility
+try:
+    from path_utils import get_config_path, get_mask_path
+except ImportError:
+    # Fallback if path_utils is not available
+    def get_config_path(filename="config.yaml"):
+        return filename
+    def get_mask_path(filename):
+        return filename
+
 
 class MainWindow(QMainWindow):
     """Main GUI window for MQTT Camera Monitoring System"""
@@ -995,10 +1005,61 @@ class MainWindow(QMainWindow):
         system_layout.addWidget(interval_label, 2, 0)
         system_layout.addWidget(self.interval_spinbox, 2, 1)
         
+        # Add separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        system_layout.addWidget(separator, 3, 0, 1, 2)
+        
+        # MQTT Broker Host input field
+        broker_label = QLabel("MQTT代理地址:")
+        self.mqtt_broker_input = QLineEdit()
+        self.mqtt_broker_input.setPlaceholderText("例如: 192.168.10.80")
+        self.mqtt_broker_input.setText("192.168.10.80")  # Default value
+        self.mqtt_broker_input.setToolTip("MQTT代理服务器的IP地址或域名")
+        system_layout.addWidget(broker_label, 4, 0)
+        system_layout.addWidget(self.mqtt_broker_input, 4, 1)
+        
+        # MQTT Port input field
+        port_label = QLabel("MQTT端口:")
+        self.mqtt_port_spinbox = QSpinBox()
+        self.mqtt_port_spinbox.setRange(1, 65535)
+        self.mqtt_port_spinbox.setValue(1883)  # Default MQTT port
+        self.mqtt_port_spinbox.setToolTip("MQTT代理服务器端口")
+        system_layout.addWidget(port_label, 5, 0)
+        system_layout.addWidget(self.mqtt_port_spinbox, 5, 1)
+        
+        # MQTT Client ID input field
+        client_id_label = QLabel("客户端ID:")
+        self.mqtt_client_id_input = QLineEdit()
+        self.mqtt_client_id_input.setPlaceholderText("例如: receiver")
+        self.mqtt_client_id_input.setText("receiver")  # Default value
+        self.mqtt_client_id_input.setToolTip("MQTT客户端标识符")
+        system_layout.addWidget(client_id_label, 6, 0)
+        system_layout.addWidget(self.mqtt_client_id_input, 6, 1)
+        
+        # MQTT Subscribe Topic input field
+        subscribe_topic_label = QLabel("订阅主题:")
+        self.mqtt_subscribe_topic_input = QLineEdit()
+        self.mqtt_subscribe_topic_input.setPlaceholderText("例如: changeState")
+        self.mqtt_subscribe_topic_input.setText("changeState")  # Default value
+        self.mqtt_subscribe_topic_input.setToolTip("订阅的MQTT主题")
+        system_layout.addWidget(subscribe_topic_label, 7, 0)
+        system_layout.addWidget(self.mqtt_subscribe_topic_input, 7, 1)
+        
+        # MQTT Publish Topic input field
+        publish_topic_label = QLabel("发布主题:")
+        self.mqtt_publish_topic_input = QLineEdit()
+        self.mqtt_publish_topic_input.setPlaceholderText("例如: receiver/triggered")
+        self.mqtt_publish_topic_input.setText("receiver/triggered")  # Default value
+        self.mqtt_publish_topic_input.setToolTip("发布触发消息的MQTT主题")
+        system_layout.addWidget(publish_topic_label, 8, 0)
+        system_layout.addWidget(self.mqtt_publish_topic_input, 8, 1)
+        
         # Auto-save status label
         self.autosave_label = QLabel("自动保存: 就绪")
         self.autosave_label.setStyleSheet("color: #666666; font-style: italic;")
-        system_layout.addWidget(self.autosave_label, 3, 0, 1, 2)
+        system_layout.addWidget(self.autosave_label, 9, 0, 1, 2)
         
         layout.addWidget(system_group)
         
@@ -1010,10 +1071,24 @@ class MainWindow(QMainWindow):
         self.global_threshold_spinbox.valueChanged.connect(self.on_parameter_changed)
         self.interval_spinbox.valueChanged.connect(self.on_parameter_changed)
         
+        # Connect MQTT parameter changes to auto-save
+        self.mqtt_broker_input.textChanged.connect(self.on_parameter_changed)
+        self.mqtt_port_spinbox.valueChanged.connect(self.on_parameter_changed)
+        self.mqtt_client_id_input.textChanged.connect(self.on_parameter_changed)
+        self.mqtt_subscribe_topic_input.textChanged.connect(self.on_parameter_changed)
+        self.mqtt_publish_topic_input.textChanged.connect(self.on_parameter_changed)
+        
         # Connect real-time validation for system parameters
         self.delay_spinbox.valueChanged.connect(self._validate_system_parameters_realtime)
         self.global_threshold_spinbox.valueChanged.connect(self._validate_system_parameters_realtime)
         self.interval_spinbox.valueChanged.connect(self._validate_system_parameters_realtime)
+        
+        # Connect real-time validation for MQTT parameters
+        self.mqtt_broker_input.textChanged.connect(self._validate_mqtt_parameters_realtime)
+        self.mqtt_port_spinbox.valueChanged.connect(self._validate_mqtt_parameters_realtime)
+        self.mqtt_client_id_input.textChanged.connect(self._validate_mqtt_parameters_realtime)
+        self.mqtt_subscribe_topic_input.textChanged.connect(self._validate_mqtt_parameters_realtime)
+        self.mqtt_publish_topic_input.textChanged.connect(self._validate_mqtt_parameters_realtime)
         
         # Also connect global threshold to update individual camera thresholds
         self.global_threshold_spinbox.valueChanged.connect(self.update_camera_thresholds)
@@ -1147,6 +1222,14 @@ class MainWindow(QMainWindow):
         # Save configuration to file
         self.save_configuration_to_file()
         
+        # Notify external callback if set (for system wrapper updates)
+        if hasattr(self, '_mqtt_config_callback') and self._mqtt_config_callback:
+            try:
+                mqtt_params = self.get_mqtt_parameters()
+                self._mqtt_config_callback(mqtt_params)
+            except Exception as e:
+                print(f"MQTT配置回调失败: {e}")
+        
         # Update status after a short delay
         QTimer.singleShot(1000, self.reset_autosave_status)
     
@@ -1154,6 +1237,10 @@ class MainWindow(QMainWindow):
         """Reset auto-save status label"""
         self.autosave_label.setText("自动保存: 已保存")
         self.autosave_label.setStyleSheet("color: #009900; font-style: italic;")
+    
+    def set_mqtt_config_callback(self, callback):
+        """Set callback function for MQTT configuration changes"""
+        self._mqtt_config_callback = callback
     
     def update_camera_thresholds(self, value: int):
         """Update all camera threshold values when global threshold changes"""
@@ -1168,6 +1255,65 @@ class MainWindow(QMainWindow):
             'monitoring_interval': self.interval_spinbox.value()
         }
     
+    def get_mqtt_parameters(self) -> dict:
+        """Get current MQTT parameters from GUI"""
+        return {
+            'broker_host': self.mqtt_broker_input.text().strip(),
+            'broker_port': self.mqtt_port_spinbox.value(),
+            'client_id': self.mqtt_client_id_input.text().strip(),
+            'subscribe_topic': self.mqtt_subscribe_topic_input.text().strip(),
+            'publish_topic': self.mqtt_publish_topic_input.text().strip(),
+            'keepalive': 60,  # Default value
+            'max_reconnect_attempts': 10,  # Default value
+            'reconnect_delay': 5  # Default value
+        }
+    
+    def apply_mqtt_parameters(self, mqtt_params: dict):
+        """Apply MQTT parameters to GUI elements"""
+        try:
+            self.mqtt_broker_input.setText(mqtt_params.get('broker_host', '192.168.10.80'))
+            self.mqtt_port_spinbox.setValue(mqtt_params.get('broker_port', 1883))
+            self.mqtt_client_id_input.setText(mqtt_params.get('client_id', 'receiver'))
+            self.mqtt_subscribe_topic_input.setText(mqtt_params.get('subscribe_topic', 'changeState'))
+            self.mqtt_publish_topic_input.setText(mqtt_params.get('publish_topic', 'receiver/triggered'))
+        except Exception as e:
+            print(f"应用MQTT参数失败: {e}")
+    
+    def _validate_mqtt_parameters_realtime(self):
+        """Real-time validation for MQTT parameters"""
+        try:
+            mqtt_params = self.get_mqtt_parameters()
+            
+            # Validate broker host
+            broker_host = mqtt_params['broker_host']
+            if not broker_host:
+                self.autosave_label.setText("错误: MQTT代理地址不能为空")
+                self.autosave_label.setStyleSheet("color: #cc0000; font-style: italic; font-weight: bold;")
+                return
+            
+            # Validate client ID
+            client_id = mqtt_params['client_id']
+            if not client_id:
+                self.autosave_label.setText("错误: 客户端ID不能为空")
+                self.autosave_label.setStyleSheet("color: #cc0000; font-style: italic; font-weight: bold;")
+                return
+            
+            # Validate topics
+            subscribe_topic = mqtt_params['subscribe_topic']
+            publish_topic = mqtt_params['publish_topic']
+            if not subscribe_topic or not publish_topic:
+                self.autosave_label.setText("错误: MQTT主题不能为空")
+                self.autosave_label.setStyleSheet("color: #cc0000; font-style: italic; font-weight: bold;")
+                return
+            
+            # If all validations pass
+            self.autosave_label.setText("自动保存: 就绪")
+            self.autosave_label.setStyleSheet("color: #666666; font-style: italic;")
+            
+        except Exception as e:
+            self.autosave_label.setText(f"MQTT参数验证错误: {e}")
+            self.autosave_label.setStyleSheet("color: #cc0000; font-style: italic; font-weight: bold;")
+    
     def save_configuration_to_file(self):
         """Save current configuration to config file"""
         try:
@@ -1176,14 +1322,21 @@ class MainWindow(QMainWindow):
             # Get current configuration
             camera_config = self.get_camera_configuration()
             system_params = self.get_system_parameters()
+            mqtt_params = self.get_mqtt_parameters()
             
             # Load existing config file or create new structure
-            config_file = "config.yaml"
+            config_file = get_config_path("config.yaml")
             if os.path.exists(config_file):
                 with open(config_file, 'r') as f:
                     config = yaml.safe_load(f) or {}
             else:
                 config = {}
+            
+            # Update MQTT configuration with GUI values (优先使用GUI配置)
+            if 'mqtt' not in config:
+                config['mqtt'] = {}
+            
+            config['mqtt'].update(mqtt_params)
             
             # Update configuration with GUI values
             if 'cameras' not in config:
@@ -1206,6 +1359,7 @@ class MainWindow(QMainWindow):
             config['gui_config']['delay_time'] = system_params['delay_time']
             config['gui_config']['monitoring_interval'] = system_params['monitoring_interval']
             config['gui_config']['cameras'] = camera_config
+            config['gui_config']['mqtt'] = mqtt_params  # 保存GUI中的MQTT配置
             
             # Save updated configuration
             with open(config_file, 'w') as f:
@@ -1221,7 +1375,7 @@ class MainWindow(QMainWindow):
         try:
             import yaml
             
-            config_file = "config.yaml"
+            config_file = get_config_path("config.yaml")
             if not os.path.exists(config_file):
                 return
             
@@ -1242,6 +1396,11 @@ class MainWindow(QMainWindow):
             red_light_config = config.get('red_light_detection', {})
             if 'count_decrease_threshold' in red_light_config:
                 self.global_threshold_spinbox.setValue(red_light_config['count_decrease_threshold'])
+            
+            # Load MQTT configuration (优先从GUI配置读取，然后从主配置读取)
+            mqtt_config = gui_config.get('mqtt', config.get('mqtt', {}))
+            if mqtt_config:
+                self.apply_mqtt_parameters(mqtt_config)
             
             # Load camera configurations
             camera_configs = gui_config.get('cameras', [])

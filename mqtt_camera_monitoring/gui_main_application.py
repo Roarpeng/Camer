@@ -15,6 +15,16 @@ from mqtt_camera_monitoring.gui_main_window import MainWindow
 from mqtt_camera_monitoring.gui_system_wrapper import GuiSystemWrapper
 from mqtt_camera_monitoring.gui_config_manager import GuiConfigManager, GuiConfiguration
 
+# Import path utilities for PyInstaller compatibility
+try:
+    from path_utils import get_config_path, ensure_config_in_exe_dir
+except ImportError:
+    # Fallback if path_utils is not available
+    def get_config_path(filename="config.yaml"):
+        return filename
+    def ensure_config_in_exe_dir(filename="config.yaml"):
+        return filename
+
 
 class MqttCameraMonitoringApp:
     """Main application class that integrates GUI, system wrapper, and configuration persistence"""
@@ -25,7 +35,12 @@ class MqttCameraMonitoringApp:
         self.system_wrapper: Optional[GuiSystemWrapper] = None
         self.config_manager: Optional[GuiConfigManager] = None
         self.status_update_timer: Optional[QTimer] = None
-        self.config_file = config_file
+        
+        # Resolve config file path for PyInstaller compatibility
+        if config_file == "config.yaml":
+            self.config_file = ensure_config_in_exe_dir(config_file)
+        else:
+            self.config_file = get_config_path(config_file)
         
         # Set up logging
         logging.basicConfig(
@@ -64,6 +79,9 @@ class MqttCameraMonitoringApp:
             
             # Connect GUI to system wrapper
             self._connect_gui_to_system()
+            
+            # Set up MQTT configuration callback
+            self.main_window.set_mqtt_config_callback(self._on_mqtt_config_changed_from_gui)
             
             # Set up configuration change monitoring for real-time auto-save
             self._setup_configuration_auto_save()
@@ -122,6 +140,22 @@ class MqttCameraMonitoringApp:
             if hasattr(self.main_window, 'interval_spinbox'):
                 self.main_window.interval_spinbox.valueChanged.connect(self._on_system_params_changed)
             
+            # Monitor MQTT parameter changes
+            if hasattr(self.main_window, 'mqtt_broker_input'):
+                self.main_window.mqtt_broker_input.textChanged.connect(self._on_mqtt_params_changed)
+            
+            if hasattr(self.main_window, 'mqtt_port_spinbox'):
+                self.main_window.mqtt_port_spinbox.valueChanged.connect(self._on_mqtt_params_changed)
+            
+            if hasattr(self.main_window, 'mqtt_client_id_input'):
+                self.main_window.mqtt_client_id_input.textChanged.connect(self._on_mqtt_params_changed)
+            
+            if hasattr(self.main_window, 'mqtt_subscribe_topic_input'):
+                self.main_window.mqtt_subscribe_topic_input.textChanged.connect(self._on_mqtt_params_changed)
+            
+            if hasattr(self.main_window, 'mqtt_publish_topic_input'):
+                self.main_window.mqtt_publish_topic_input.textChanged.connect(self._on_mqtt_params_changed)
+            
             self.logger.info("Configuration monitoring set up")
             
         except Exception as e:
@@ -162,6 +196,38 @@ class MqttCameraMonitoringApp:
             
         except Exception as e:
             self.logger.error(f"System parameter update failed: {e}")
+    
+    def _on_mqtt_params_changed(self):
+        """Handle MQTT parameter changes with auto-save"""
+        try:
+            # Get current MQTT parameters from GUI
+            mqtt_params = self.main_window.get_mqtt_parameters()
+            
+            # Save GUI configuration automatically when parameters change
+            if self.config_manager:
+                # Update the configuration manager with MQTT params
+                # This will be saved to the config file
+                pass  # The save will happen through the main window's save method
+            
+            # Update system wrapper MQTT configuration
+            if self.system_wrapper:
+                self.system_wrapper.update_mqtt_configuration(mqtt_params)
+            
+            self.logger.debug("MQTT parameters auto-saved")
+            
+        except Exception as e:
+            self.logger.error(f"MQTT parameter update failed: {e}")
+    
+    def _on_mqtt_config_changed_from_gui(self, mqtt_params):
+        """Handle MQTT configuration changes from GUI main window"""
+        try:
+            # Update system wrapper MQTT configuration immediately
+            if self.system_wrapper:
+                self.system_wrapper.update_mqtt_configuration(mqtt_params)
+                self.logger.debug("MQTT configuration updated from GUI callback")
+            
+        except Exception as e:
+            self.logger.error(f"MQTT configuration callback failed: {e}")
     
     def _update_gui_status(self):
         """Update GUI with current system status"""

@@ -16,6 +16,13 @@ from .trigger_publisher import TriggerPublisher
 from .lightweight_monitor import LightweightVisualMonitor as VisualMonitor
 from .main_controller import MainController
 from .config import ConfigManager, SystemConfig
+from .config_validator import ConfigurationValidator, ValidationResult, MQTTConfigData
+from .diagnostic_tool import DiagnosticTool, DiagnosticReport, NetworkTest, BrokerTest
+from .data_models import (
+    MQTTConfiguration, ConnectionMetrics, HealthMetrics, PerformanceReport,
+    LogEntry, SystemConfiguration, ConnectionEvent, QualityReport,
+    ConnectionState, HealthStatus
+)
 
 __all__ = [
     'MQTTClient',
@@ -25,5 +32,22 @@ __all__ = [
     'VisualMonitor',
     'MainController',
     'ConfigManager',
-    'SystemConfig'
+    'SystemConfig',
+    'ConfigurationValidator',
+    'ValidationResult',
+    'MQTTConfigData',
+    'DiagnosticTool',
+    'DiagnosticReport',
+    'NetworkTest',
+    'BrokerTest',
+    'MQTTConfiguration',
+    'ConnectionMetrics',
+    'HealthMetrics',
+    'PerformanceReport',
+    'LogEntry',
+    'SystemConfiguration',
+    'ConnectionEvent',
+    'QualityReport',
+    'ConnectionState',
+    'HealthStatus'
 ]

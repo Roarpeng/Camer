@@ -15,6 +15,16 @@ from copy import deepcopy
 
 from mqtt_camera_monitoring.config import ConfigManager
 
+# Import path utilities for PyInstaller compatibility
+try:
+    from path_utils import get_config_path, ensure_config_in_exe_dir
+except ImportError:
+    # Fallback if path_utils is not available
+    def get_config_path(filename="config.yaml"):
+        return filename
+    def ensure_config_in_exe_dir(filename="config.yaml"):
+        return filename
+
 
 @dataclass
 class GuiCameraConfig:
@@ -54,7 +64,11 @@ class GuiConfigManager:
             config_file: Path to configuration file
             auto_save: Enable automatic saving on parameter changes
         """
-        self.config_file = config_file
+        # Resolve config file path for PyInstaller compatibility
+        if config_file == "config.yaml":
+            self.config_file = ensure_config_in_exe_dir(config_file)
+        else:
+            self.config_file = get_config_path(config_file)
         self.auto_save = auto_save
         self.logger = logging.getLogger(__name__)
         

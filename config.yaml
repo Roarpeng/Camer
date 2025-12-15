@@ -15,28 +15,67 @@ gui_config:
   cameras:
   - baseline_count: 0
     camera_id: 0
-    enabled: true
-    mask_path: C:\Users\vboxuser\AppData\Local\Temp\tmp6idmky2k.png
+    enabled: false
+    mask_path: ''
     physical_camera_id: 0
-    threshold: 2
-  delay_time: 0.4
-  last_updated: 1765789641.531542
-  monitoring_interval: 0.2
+    threshold: 10
+  - baseline_count: 0
+    camera_id: 1
+    enabled: false
+    mask_path: ''
+    physical_camera_id: 0
+    threshold: 10
+  - baseline_count: 0
+    camera_id: 2
+    enabled: false
+    mask_path: ''
+    physical_camera_id: 0
+    threshold: 10
+  - baseline_count: 0
+    camera_id: 3
+    enabled: false
+    mask_path: ''
+    physical_camera_id: 0
+    threshold: 10
+  - baseline_count: 0
+    camera_id: 4
+    enabled: false
+    mask_path: ''
+    physical_camera_id: 0
+    threshold: 10
+  - baseline_count: 0
+    camera_id: 5
+    enabled: false
+    mask_path: ''
+    physical_camera_id: 0
+    threshold: 10
+  delay_time: 0.1
+  last_updated: 1765795780.7843256
+  monitoring_interval: 0.1
+  mqtt:
+    broker_host: 192.168.50.153
+    broker_port: 1871
+    client_id: receiver
+    keepalive: 60
+    max_reconnect_attempts: 10
+    publish_topic: receiver/triggred
+    reconnect_delay: 5
+    subscribe_topic: changeState
   system_parameters:
-    delay_time: 0.4
-    global_threshold: 2
-    monitoring_interval: 0.2
+    delay_time: 0.1
+    global_threshold: 10
+    monitoring_interval: 0.1
 logging:
   file: mqtt_camera_monitoring.log
   format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
   level: INFO
 mqtt:
-  broker_host: 192.168.10.80
-  broker_port: 1883
+  broker_host: 192.168.50.153
+  broker_port: 1871
   client_id: receiver
   keepalive: 60
   max_reconnect_attempts: 10
-  publish_topic: receiver/triggered
+  publish_topic: receiver/triggred
   reconnect_delay: 5
   subscribe_topic: changeState
 red_light_detection:
@@ -44,7 +83,7 @@ red_light_detection:
   area_decrease_threshold: 0
   baseline_duration: 1.0
   brightness_threshold: 30
-  count_decrease_threshold: 1
+  count_decrease_threshold: 10
   erosion_iterations: 0
   erosion_kernel: 1
   exclude_ones_count: 144

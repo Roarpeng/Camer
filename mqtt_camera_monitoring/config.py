@@ -137,7 +137,16 @@ class ConfigManager:
         Args:
             config_file: Path to configuration file
         """
-        self.config_file = config_file
+        # Import path utilities for PyInstaller compatibility
+        try:
+            from path_utils import get_config_path, ensure_config_in_exe_dir
+            if config_file == "config.yaml":
+                self.config_file = ensure_config_in_exe_dir(config_file)
+            else:
+                self.config_file = get_config_path(config_file)
+        except ImportError:
+            # Fallback if path_utils is not available
+            self.config_file = config_file
         self._config = None
     
     def load_config(self) -> SystemConfig:

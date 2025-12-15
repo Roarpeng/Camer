@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 GUI System Wrapper for FinalProductionSystem
-Provides interface between GUI and existing production system
+Provides interface between GUI and existing production system with enhanced
+MQTT connection reliability, diagnostics, and real-time monitoring.
 """
 
 import os
@@ -9,13 +10,36 @@ import cv2
 import time
 import threading
 import logging
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass
 from copy import deepcopy
+from datetime import datetime
 
 # Import existing system components
 from final_production_system import FinalProductionSystem, CameraState
 from mqtt_camera_monitoring.config import ConfigManager
+
+# Import enhanced MQTT reliability components
+from mqtt_camera_monitoring.connection_manager import ConnectionManager, ConnectionResult
+from mqtt_camera_monitoring.diagnostic_tool import DiagnosticTool, DiagnosticReport
+from mqtt_camera_monitoring.health_monitor import HealthMonitor
+from mqtt_camera_monitoring.log_manager import EnhancedLogManager
+from mqtt_camera_monitoring.log_viewer import LogViewerInterface, LogViewerGUI
+from mqtt_camera_monitoring.data_models import (
+    MQTTConfiguration, SystemConfiguration, HealthMetrics, 
+    ConnectionMetrics, PerformanceReport, QualityReport,
+    ConnectionState, HealthStatus, LogLevel, LogCategory
+)
+
+# Import path utilities for PyInstaller compatibility
+try:
+    from path_utils import get_config_path, ensure_config_in_exe_dir
+except ImportError:
+    # Fallback if path_utils is not available
+    def get_config_path(filename="config.yaml"):
+        return filename
+    def ensure_config_in_exe_dir(filename="config.yaml"):
+        return filename
 
 
 @dataclass
@@ -30,15 +54,22 @@ class GuiCameraConfig:
 
 
 class GuiSystemWrapper:
-    """Wrapper class that interfaces with existing FinalProductionSystem"""
+    """
+    Enhanced wrapper class that interfaces with existing FinalProductionSystem
+    and provides integrated MQTT connection reliability, diagnostics, and monitoring.
+    """
     
     def __init__(self, config_file: str = "config.yaml"):
         # Set up logging
         self.logger = logging.getLogger(__name__)
         
-        # Configuration
-        self.config_file = config_file
-        self.config_manager = ConfigManager(config_file)
+        # Configuration - resolve path for PyInstaller compatibility
+        if config_file == "config.yaml":
+            self.config_file = ensure_config_in_exe_dir(config_file)
+        else:
+            self.config_file = get_config_path(config_file)
+        
+        self.config_manager = ConfigManager(self.config_file)
         
         # System state
         self.production_system: Optional[FinalProductionSystem] = None
@@ -50,6 +81,40 @@ class GuiSystemWrapper:
             'global_threshold': 2
         }
         
+        # MQTT configuration from GUI (优先使用GUI配置)
+        self.gui_mqtt_config = {
+            'broker_host': '192.168.10.80',
+            'broker_port': 1883,
+            'client_id': 'receiver',
+            'subscribe_topic': 'changeState',
+            'publish_topic': 'receiver/triggered',
+            'keepalive': 60,
+            'max_reconnect_attempts': 10,
+            'reconnect_delay': 5
+        }
+        
+        # Enhanced MQTT reliability components
+        self.connection_manager: Optional[ConnectionManager] = None
+        self.diagnostic_tool = DiagnosticTool()
+        self.health_monitor = HealthMonitor()
+        
+        # Enhanced log management system
+        self.log_manager = EnhancedLogManager(
+            log_directory="logs",
+            max_file_size=10 * 1024 * 1024,  # 10MB
+            backup_count=5,
+            compression_enabled=True,
+            memory_buffer_size=1000
+        )
+        self.log_viewer = LogViewerInterface(self.log_manager)
+        self.log_viewer_gui = LogViewerGUI(self.log_viewer)
+        
+        # Diagnostic and monitoring state
+        self.last_diagnostic_report: Optional[DiagnosticReport] = None
+        self.current_health_metrics: Optional[HealthMetrics] = None
+        self.current_performance_report: Optional[PerformanceReport] = None
+        self.diagnostic_in_progress = False
+        
         # Status callbacks for GUI updates
         self.status_callbacks: Dict[str, Callable] = {}
         
@@ -57,12 +122,284 @@ class GuiSystemWrapper:
         self.status_thread: Optional[threading.Thread] = None
         self.status_lock = threading.Lock()
         
-        self.logger.info("GUI System Wrapper initialized")
+        # Initialize enhanced monitoring callbacks
+        self._setup_monitoring_callbacks()
+        
+        self.logger.info("Enhanced GUI System Wrapper initialized with MQTT reliability components")
     
     def set_status_callback(self, callback_name: str, callback_func: Callable):
         """Set callback function for GUI status updates"""
         self.status_callbacks[callback_name] = callback_func
         self.logger.debug(f"Status callback set: {callback_name}")
+    
+    def _setup_monitoring_callbacks(self):
+        """Setup callbacks for enhanced monitoring components"""
+        # Health monitor callbacks
+        self.health_monitor.add_status_callback(self._on_health_status_update)
+        self.health_monitor.add_quality_callback(self._on_quality_report_update)
+        self.health_monitor.add_report_callback(self._on_performance_report_update)
+    
+    def _on_health_status_update(self, health_metrics: HealthMetrics):
+        """Handle health status updates from health monitor"""
+        try:
+            self.current_health_metrics = health_metrics
+            
+            # Update GUI with health information
+            if 'update_connection_health' in self.status_callbacks:
+                self.status_callbacks['update_connection_health'](
+                    health_metrics.health_status.value,
+                    health_metrics.connection_state.value,
+                    health_metrics.get_status_summary()
+                )
+            
+            # Update connection statistics display
+            if 'update_connection_statistics' in self.status_callbacks:
+                stats = {
+                    'uptime': health_metrics.timestamp.isoformat() if health_metrics.timestamp else "",
+                    'error_count': health_metrics.error_count,
+                    'warning_count': health_metrics.warning_count,
+                    'system_load': health_metrics.system_load,
+                    'memory_usage': health_metrics.memory_usage,
+                    'network_latency': health_metrics.network_latency
+                }
+                self.status_callbacks['update_connection_statistics'](stats)
+                
+        except Exception as e:
+            self.logger.error(f"Error handling health status update: {e}")
+    
+    def _on_quality_report_update(self, quality_report: QualityReport):
+        """Handle connection quality reports"""
+        try:
+            # Update GUI with quality information
+            if 'update_connection_quality' in self.status_callbacks:
+                self.status_callbacks['update_connection_quality'](
+                    quality_report.overall_quality,
+                    quality_report.get_quality_level(),
+                    quality_report.issues_detected,
+                    quality_report.recommendations
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error handling quality report update: {e}")
+    
+    def _on_performance_report_update(self, performance_report: PerformanceReport):
+        """Handle performance reports"""
+        try:
+            self.current_performance_report = performance_report
+            
+            # Log performance metrics
+            connection_metrics = performance_report.connection_metrics
+            self.log_performance_event(
+                metric_name="connection_quality_score",
+                metric_value=connection_metrics.quality_score,
+                threshold=75.0,  # Quality threshold
+                details={
+                    "report_id": performance_report.report_id,
+                    "time_period": performance_report.time_period,
+                    "uptime": connection_metrics.connection_uptime,
+                    "success_rate": connection_metrics.message_success_rate,
+                    "latency": connection_metrics.average_latency,
+                    "reconnection_count": connection_metrics.reconnection_count
+                }
+            )
+            
+            # Log performance issues if any
+            if performance_report.recommendations:
+                self.log_manager.log_event(
+                    level=LogLevel.WARNING,
+                    category=LogCategory.PERFORMANCE,
+                    component="health_monitor",
+                    message="Performance issues detected",
+                    details={
+                        "report_id": performance_report.report_id,
+                        "recommendations": performance_report.recommendations,
+                        "quality_score": connection_metrics.quality_score
+                    }
+                )
+            
+            # Update GUI with performance information
+            if 'update_performance_report' in self.status_callbacks:
+                self.status_callbacks['update_performance_report'](
+                    performance_report.report_id,
+                    performance_report.timestamp.isoformat(),
+                    performance_report.time_period,
+                    performance_report.recommendations
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error handling performance report update: {e}")
+            self.log_error_with_context(
+                component="gui_system_wrapper",
+                error=e,
+                context={"method": "_on_performance_report_update"},
+                user_action="performance_monitoring"
+            )
+    
+    def run_manual_diagnostics(self) -> DiagnosticReport:
+        """
+        Run manual MQTT connection diagnostics and return results.
+        
+        Returns:
+            DiagnosticReport: Complete diagnostic report with recommendations
+        """
+        try:
+            if self.diagnostic_in_progress:
+                self.logger.warning("Diagnostic already in progress")
+                return self.last_diagnostic_report or DiagnosticReport(
+                    timestamp=datetime.now(),
+                    network_test=None,
+                    broker_test=None,
+                    config_validation=None,
+                    overall_status="skipped",
+                    recommendations=["诊断正在进行中，请稍候"]
+                )
+            
+            self.diagnostic_in_progress = True
+            self.logger.info("Starting manual MQTT diagnostics...")
+            
+            # Update GUI to show diagnostic in progress
+            if 'update_diagnostic_status' in self.status_callbacks:
+                self.status_callbacks['update_diagnostic_status'](
+                    "running", "正在运行诊断检查...", []
+                )
+            
+            # Get effective MQTT configuration
+            effective_config = self.get_effective_mqtt_config()
+            
+            # Run full diagnostics
+            diagnostic_report = self.diagnostic_tool.run_full_diagnostics(effective_config)
+            self.last_diagnostic_report = diagnostic_report
+            
+            # Update GUI with diagnostic results
+            if 'update_diagnostic_status' in self.status_callbacks:
+                status = "passed" if diagnostic_report.is_successful else "failed"
+                self.status_callbacks['update_diagnostic_status'](
+                    status, 
+                    f"诊断完成: {diagnostic_report.overall_status.value}",
+                    diagnostic_report.recommendations
+                )
+            
+            # Display diagnostic report in GUI
+            if 'show_diagnostic_report' in self.status_callbacks:
+                self.status_callbacks['show_diagnostic_report'](diagnostic_report)
+            
+            self.logger.info(f"Manual diagnostics completed: {diagnostic_report.overall_status.value}")
+            return diagnostic_report
+            
+        except Exception as e:
+            error_msg = f"Manual diagnostics failed: {str(e)}"
+            self.logger.error(error_msg)
+            
+            # Update GUI with error
+            if 'update_diagnostic_status' in self.status_callbacks:
+                self.status_callbacks['update_diagnostic_status'](
+                    "failed", error_msg, ["请检查系统配置并重试"]
+                )
+            
+            # Create error report
+            error_report = DiagnosticReport(
+                timestamp=datetime.now(),
+                network_test=None,
+                broker_test=None,
+                config_validation=None,
+                overall_status="failed",
+                recommendations=[error_msg, "请检查系统配置并重试"]
+            )
+            
+            return error_report
+            
+        finally:
+            self.diagnostic_in_progress = False
+    
+    def get_diagnostic_report(self) -> Optional[DiagnosticReport]:
+        """Get the last diagnostic report"""
+        return self.last_diagnostic_report
+    
+    def get_connection_statistics(self) -> Dict[str, any]:
+        """
+        Get comprehensive connection statistics for GUI display.
+        
+        Returns:
+            Dict containing connection metrics and health information
+        """
+        try:
+            stats = {
+                'connection_state': 'disconnected',
+                'health_status': 'unknown',
+                'uptime': 0.0,
+                'message_success_rate': 0.0,
+                'average_latency': 0.0,
+                'reconnection_count': 0,
+                'error_count': 0,
+                'warning_count': 0,
+                'quality_score': 0.0,
+                'last_error': None,
+                'system_load': 0.0,
+                'memory_usage': 0.0,
+                'network_latency': 0.0
+            }
+            
+            # Get connection manager statistics
+            if self.connection_manager:
+                connection_status = self.connection_manager.get_connection_status()
+                stats.update({
+                    'connection_state': connection_status.get('connection_state', 'disconnected'),
+                    'health_status': connection_status.get('health_status', 'unknown')
+                })
+                
+                # Get connection metrics if available
+                if 'connection_metrics' in connection_status:
+                    metrics = connection_status['connection_metrics']
+                    stats.update({
+                        'uptime': metrics.get('connection_uptime', 0.0),
+                        'message_success_rate': metrics.get('message_success_rate', 0.0),
+                        'average_latency': metrics.get('average_latency', 0.0),
+                        'reconnection_count': metrics.get('reconnection_count', 0),
+                        'quality_score': metrics.get('quality_score', 0.0),
+                        'last_error': metrics.get('last_error')
+                    })
+            
+            # Get health monitor statistics
+            if self.current_health_metrics:
+                stats.update({
+                    'error_count': self.current_health_metrics.error_count,
+                    'warning_count': self.current_health_metrics.warning_count,
+                    'system_load': self.current_health_metrics.system_load,
+                    'memory_usage': self.current_health_metrics.memory_usage,
+                    'network_latency': self.current_health_metrics.network_latency
+                })
+            
+            return stats
+            
+        except Exception as e:
+            self.logger.error(f"Error getting connection statistics: {e}")
+            return {
+                'connection_state': 'error',
+                'health_status': 'critical',
+                'error_message': str(e)
+            }
+    
+    def trigger_manual_diagnostic_button(self):
+        """Handle manual diagnostic button trigger from GUI"""
+        try:
+            self.logger.info("Manual diagnostic button triggered")
+            
+            # Run diagnostics in background thread to avoid blocking GUI
+            diagnostic_thread = threading.Thread(
+                target=self.run_manual_diagnostics,
+                name="ManualDiagnostic"
+            )
+            diagnostic_thread.daemon = True
+            diagnostic_thread.start()
+            
+        except Exception as e:
+            error_msg = f"Failed to start manual diagnostics: {str(e)}"
+            self.logger.error(error_msg)
+            
+            if 'show_error_message' in self.status_callbacks:
+                self.status_callbacks['show_error_message'](
+                    "诊断启动失败", error_msg
+                )
     
     def configure_cameras(self, camera_configs: List[Dict]) -> bool:
         """Configure cameras from GUI settings"""
@@ -111,15 +448,144 @@ class GuiSystemWrapper:
             if hasattr(self.production_system, 'baseline_capture_time'):
                 # This affects future baseline captures
                 pass
+        except Exception as e:
+            self.logger.error(f"Failed to apply dynamic parameter updates: {e}")
+    
+    def update_mqtt_configuration(self, mqtt_config: Dict) -> bool:
+        """Update MQTT configuration with enhanced reliability validation"""
+        try:
+            # Log the incoming configuration
+            self.logger.info(f"Updating MQTT configuration from GUI: {mqtt_config}")
             
-            # Update monitoring interval
-            # Note: The existing system uses fixed 0.3s interval in detection_loop
-            # This would require modification of the existing system to be truly dynamic
+            # Update GUI MQTT config
+            old_config = self.gui_mqtt_config.copy()
+            self.gui_mqtt_config.update(mqtt_config)
             
-            self.logger.info("Dynamic parameter updates applied")
+            # Check if broker or port changed
+            broker_changed = (old_config.get('broker_host') != mqtt_config.get('broker_host') or
+                            old_config.get('broker_port') != mqtt_config.get('broker_port'))
+            
+            if broker_changed:
+                self.logger.info(f"MQTT broker changed from {old_config.get('broker_host')}:{old_config.get('broker_port')} "
+                               f"to {mqtt_config.get('broker_host')}:{mqtt_config.get('broker_port')}")
+            
+            # Validate new configuration using diagnostic tool
+            effective_config = self.get_effective_mqtt_config()
+            validation_result = self.diagnostic_tool.run_full_diagnostics(effective_config)
+            
+            if not validation_result.is_successful:
+                error_msg = f"MQTT配置验证失败: {', '.join(validation_result.recommendations)}"
+                self.logger.error(error_msg)
+                
+                # Show validation error in GUI
+                if 'show_error_message' in self.status_callbacks:
+                    self.status_callbacks['show_error_message'](
+                        "MQTT配置验证失败", error_msg
+                    )
+                
+                # Revert to old configuration
+                self.gui_mqtt_config = old_config
+                return False
+            
+            # Apply configuration changes through connection manager
+            if self.running and self.connection_manager:
+                self.logger.info("System is running, applying MQTT configuration through connection manager")
+                
+                # Create new MQTT configuration object
+                new_mqtt_config = MQTTConfiguration.from_dict(effective_config)
+                
+                # Apply configuration changes
+                success = self.connection_manager.apply_configuration_changes(new_mqtt_config)
+                
+                if success:
+                    self.logger.info("MQTT configuration applied successfully through connection manager")
+                    
+                    # Update GUI with success
+                    if 'update_mqtt_configuration_status' in self.status_callbacks:
+                        self.status_callbacks['update_mqtt_configuration_status'](
+                            True, "MQTT配置更新成功"
+                        )
+                else:
+                    self.logger.error("Failed to apply MQTT configuration through connection manager")
+                    
+                    # Update GUI with error
+                    if 'update_mqtt_configuration_status' in self.status_callbacks:
+                        self.status_callbacks['update_mqtt_configuration_status'](
+                            False, "MQTT配置应用失败"
+                        )
+                
+                return success
+            elif self.running and self.production_system:
+                # Fallback to legacy method if connection manager not available
+                self.logger.info("System is running, applying MQTT configuration using legacy method")
+                success = self._apply_mqtt_configuration()
+                if success:
+                    self.logger.info("MQTT configuration applied successfully using legacy method")
+                else:
+                    self.logger.error("Failed to apply MQTT configuration using legacy method")
+                return success
+            else:
+                self.logger.info("System not running, MQTT configuration will be applied on next start")
+            
+            return True
             
         except Exception as e:
-            self.logger.error(f"Dynamic parameter update failed: {e}")
+            self.logger.error(f"Failed to update MQTT configuration: {e}")
+            
+            # Show error in GUI
+            if 'show_error_message' in self.status_callbacks:
+                self.status_callbacks['show_error_message'](
+                    "MQTT配置更新失败", str(e)
+                )
+            
+            return False
+    
+    def get_effective_mqtt_config(self) -> Dict:
+        """获取有效的MQTT配置 (优先GUI配置，然后配置文件)"""
+        try:
+            # 首先尝试从配置文件加载
+            file_config = {
+                'broker_host': '192.168.10.80',
+                'broker_port': 1883,
+                'client_id': 'receiver',
+                'subscribe_topic': 'changeState',
+                'publish_topic': 'receiver/triggered',
+                'keepalive': 60,
+                'max_reconnect_attempts': 10,
+                'reconnect_delay': 5
+            }
+            
+            if hasattr(self.config_manager, 'load_config'):
+                try:
+                    config = self.config_manager.load_config()
+                    if hasattr(config, 'mqtt'):
+                        file_config.update({
+                            'broker_host': config.mqtt.broker_host,
+                            'broker_port': config.mqtt.broker_port,
+                            'client_id': config.mqtt.client_id,
+                            'subscribe_topic': config.mqtt.subscribe_topic,
+                            'publish_topic': config.mqtt.publish_topic,
+                            'keepalive': config.mqtt.keepalive,
+                            'max_reconnect_attempts': config.mqtt.max_reconnect_attempts,
+                            'reconnect_delay': config.mqtt.reconnect_delay
+                        })
+                except Exception as e:
+                    self.logger.warning(f"Failed to load MQTT config from file: {e}")
+            
+            # 合并配置：GUI配置优先，只覆盖非空值
+            effective_config = file_config.copy()
+            for key, value in self.gui_mqtt_config.items():
+                if value is not None and value != "":
+                    effective_config[key] = value
+            
+            self.logger.debug(f"File config: {file_config}")
+            self.logger.debug(f"GUI config: {self.gui_mqtt_config}")
+            self.logger.debug(f"Effective MQTT config: {effective_config}")
+            return effective_config
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get effective MQTT config: {e}")
+            return self.gui_mqtt_config
     
     def validate_camera_configuration(self) -> tuple[bool, str]:
         """Validate camera configuration before starting with comprehensive checks"""
@@ -211,6 +677,10 @@ class GuiSystemWrapper:
                 enable_view=False  # GUI handles visualization
             )
             
+            # IMPORTANT: Apply MQTT configuration BEFORE system starts
+            # This ensures the production system uses GUI-configured MQTT settings
+            self._apply_mqtt_configuration_to_config()
+            
             # Override the camera initialization to support our multi-camera setup
             self._override_camera_initialization()
             
@@ -219,6 +689,30 @@ class GuiSystemWrapper:
         except Exception as e:
             self.logger.error(f"Failed to create production system: {e}")
             return False
+    
+    def _apply_mqtt_configuration_to_config(self):
+        """Apply MQTT configuration from GUI to production system config before startup"""
+        try:
+            # Get effective MQTT config (GUI priority)
+            effective_mqtt = self.get_effective_mqtt_config()
+            
+            # Update production system's MQTT configuration BEFORE it starts
+            if hasattr(self.production_system, 'config') and hasattr(self.production_system.config, 'mqtt'):
+                self.production_system.config.mqtt.broker_host = effective_mqtt['broker_host']
+                self.production_system.config.mqtt.broker_port = effective_mqtt['broker_port']
+                self.production_system.config.mqtt.client_id = effective_mqtt['client_id']
+                self.production_system.config.mqtt.subscribe_topic = effective_mqtt['subscribe_topic']
+                self.production_system.config.mqtt.publish_topic = effective_mqtt['publish_topic']
+                self.production_system.config.mqtt.keepalive = effective_mqtt.get('keepalive', 60)
+                self.production_system.config.mqtt.max_reconnect_attempts = effective_mqtt.get('max_reconnect_attempts', 10)
+                self.production_system.config.mqtt.reconnect_delay = effective_mqtt.get('reconnect_delay', 5)
+                
+                self.logger.info(f"Pre-startup MQTT configuration applied: {effective_mqtt['broker_host']}:{effective_mqtt['broker_port']}")
+            else:
+                self.logger.warning("Production system MQTT config not found during pre-startup configuration")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to apply pre-startup MQTT configuration: {e}")
     
     def _override_camera_initialization(self):
         """Override camera initialization to support GUI configuration"""
@@ -319,13 +813,35 @@ class GuiSystemWrapper:
         self._override_baseline_capture_logging()
     
     def start_system(self) -> bool:
-        """Start the production system with GUI configuration and comprehensive error handling"""
+        """Start the production system with enhanced MQTT reliability and monitoring"""
         try:
+            # Log system startup event
+            self.log_manager.log_event(
+                level=LogLevel.INFO,
+                category=LogCategory.SYSTEM,
+                component="gui_system_wrapper",
+                message="System startup initiated",
+                details={"action": "start_system"}
+            )
+            
             # Clear previous errors
             if 'clear_all_errors' in self.status_callbacks:
                 self.status_callbacks['clear_all_errors']()
             
-            # Validate configuration first
+            # Step 1: Run startup diagnostics
+            self.logger.info("Running startup diagnostics...")
+            startup_diagnostic = self.run_manual_diagnostics()
+            
+            if not startup_diagnostic.is_successful:
+                error_msg = f"启动诊断失败: {', '.join(startup_diagnostic.recommendations)}"
+                self.logger.error(error_msg)
+                if 'show_error_message' in self.status_callbacks:
+                    self.status_callbacks['show_error_message'](
+                        "启动诊断失败", error_msg
+                    )
+                return False
+            
+            # Step 2: Validate camera configuration
             valid, error_msg = self.validate_camera_configuration()
             if not valid:
                 self.logger.error(f"Configuration validation failed: {error_msg}")
@@ -337,7 +853,17 @@ class GuiSystemWrapper:
                     self.status_callbacks['update_system_health'](0, 0, False, error_msg)
                 return False
             
-            # Create and configure production system
+            # Step 3: Initialize enhanced MQTT components
+            if not self._initialize_enhanced_mqtt_components():
+                error_msg = "MQTT组件初始化失败"
+                self.logger.error(error_msg)
+                if 'show_error_message' in self.status_callbacks:
+                    self.status_callbacks['show_error_message'](
+                        "MQTT组件初始化失败", error_msg
+                    )
+                return False
+            
+            # Step 4: Create and configure production system
             if not self._create_modified_production_system():
                 error_msg = "生产系统创建失败"
                 self.logger.error(error_msg)
@@ -349,7 +875,7 @@ class GuiSystemWrapper:
                     self.status_callbacks['update_system_health'](0, 0, False, error_msg)
                 return False
             
-            # Apply GUI configuration to system
+            # Step 5: Apply GUI configuration to system
             try:
                 self._apply_gui_configuration()
             except Exception as e:
@@ -363,7 +889,10 @@ class GuiSystemWrapper:
                     self.status_callbacks['update_system_health'](0, 0, False, error_msg)
                 return False
             
-            # Start the production system
+            # Step 6: Start enhanced monitoring
+            self._start_enhanced_monitoring()
+            
+            # Step 7: Start the production system
             try:
                 if self.production_system.start():
                     self.running = True
@@ -372,7 +901,7 @@ class GuiSystemWrapper:
                     self.status_thread = threading.Thread(target=self._status_monitoring_loop, daemon=True)
                     self.status_thread.start()
                     
-                    self.logger.info("GUI System started successfully")
+                    self.logger.info("Enhanced GUI System started successfully")
                     
                     # Update GUI status with success
                     if 'update_system_health' in self.status_callbacks:
@@ -391,10 +920,32 @@ class GuiSystemWrapper:
                                 "摄像头初始化警告", warning_msg
                             )
                     
+                    # Log successful system startup
+                    self.log_manager.log_event(
+                        level=LogLevel.INFO,
+                        category=LogCategory.SYSTEM,
+                        component="gui_system_wrapper",
+                        message="System startup completed successfully",
+                        details={
+                            "active_cameras": len(active_cameras),
+                            "failed_cameras": failed_cameras,
+                            "total_cameras": len(self.gui_cameras)
+                        }
+                    )
                     return True
                 else:
                     error_msg = "生产系统启动失败"
                     self.logger.error(error_msg)
+                    
+                    # Log system startup failure
+                    self.log_manager.log_event(
+                        level=LogLevel.ERROR,
+                        category=LogCategory.SYSTEM,
+                        component="gui_system_wrapper",
+                        message="Production system startup failed",
+                        details={"error": error_msg}
+                    )
+                    
                     if 'show_error_message' in self.status_callbacks:
                         self.status_callbacks['show_error_message'](
                             "系统启动失败", error_msg
@@ -405,6 +956,15 @@ class GuiSystemWrapper:
             except Exception as e:
                 error_msg = f"系统启动异常: {str(e)}"
                 self.logger.error(error_msg)
+                
+                # Log system startup exception with context
+                self.log_error_with_context(
+                    component="gui_system_wrapper",
+                    error=e,
+                    context={"method": "start_system", "stage": "production_system_start"},
+                    user_action="system_startup"
+                )
+                
                 if 'show_error_message' in self.status_callbacks:
                     self.status_callbacks['show_error_message'](
                         "系统启动异常", str(e)
@@ -416,6 +976,15 @@ class GuiSystemWrapper:
         except Exception as e:
             error_msg = f"系统启动失败: {str(e)}"
             self.logger.error(error_msg)
+            
+            # Log system startup failure with context
+            self.log_error_with_context(
+                component="gui_system_wrapper",
+                error=e,
+                context={"method": "start_system", "stage": "initialization"},
+                user_action="system_startup"
+            )
+            
             if 'show_error_message' in self.status_callbacks:
                 self.status_callbacks['show_error_message'](
                     "系统启动失败", str(e)
@@ -425,20 +994,46 @@ class GuiSystemWrapper:
             return False
     
     def stop_system(self) -> bool:
-        """Stop the production system"""
+        """Stop the production system and enhanced monitoring"""
         try:
+            # Log system shutdown event
+            self.log_manager.log_event(
+                level=LogLevel.INFO,
+                category=LogCategory.SYSTEM,
+                component="gui_system_wrapper",
+                message="System shutdown initiated",
+                details={"action": "stop_system"}
+            )
+            
             self.running = False
+            
+            # Stop enhanced monitoring components
+            self._stop_enhanced_monitoring()
             
             # Stop status monitoring thread
             if self.status_thread and self.status_thread.is_alive():
                 self.status_thread.join(timeout=2.0)
+            
+            # Stop connection manager
+            if self.connection_manager:
+                self.connection_manager.stop_connection()
+                self.connection_manager = None
             
             # Stop production system
             if self.production_system:
                 self.production_system.stop()
                 self.production_system = None
             
-            self.logger.info("GUI System stopped successfully")
+            self.logger.info("Enhanced GUI System stopped successfully")
+            
+            # Log successful system shutdown
+            self.log_manager.log_event(
+                level=LogLevel.INFO,
+                category=LogCategory.SYSTEM,
+                component="gui_system_wrapper",
+                message="System shutdown completed successfully",
+                details={"action": "stop_system"}
+            )
             
             # Update GUI status
             if 'update_system_health' in self.status_callbacks:
@@ -448,7 +1043,144 @@ class GuiSystemWrapper:
             
         except Exception as e:
             self.logger.error(f"System stop failed: {e}")
+            
+            # Log system shutdown failure with context
+            self.log_error_with_context(
+                component="gui_system_wrapper",
+                error=e,
+                context={"method": "stop_system"},
+                user_action="system_shutdown"
+            )
+            
             return False
+    
+    def _initialize_enhanced_mqtt_components(self) -> bool:
+        """Initialize enhanced MQTT reliability components"""
+        try:
+            self.logger.info("Initializing enhanced MQTT components...")
+            
+            # Get effective MQTT configuration
+            effective_config = self.get_effective_mqtt_config()
+            
+            # Create MQTT configuration object
+            mqtt_config = MQTTConfiguration.from_dict(effective_config)
+            
+            # Create system configuration
+            system_config = SystemConfiguration(
+                mqtt_config=mqtt_config,
+                monitoring_interval=1.0,
+                health_check_interval=30.0,
+                performance_report_interval=3600.0,
+                enable_health_monitoring=True,
+                enable_performance_monitoring=True
+            )
+            
+            # Initialize connection manager
+            self.connection_manager = ConnectionManager(system_config)
+            
+            # Set up connection callbacks
+            self.connection_manager.add_connection_callback(self._on_connection_event)
+            self.connection_manager.add_health_callback(self._on_health_metrics_update)
+            self.connection_manager.add_performance_callback(self._on_performance_report_callback)
+            
+            self.logger.info("Enhanced MQTT components initialized successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize enhanced MQTT components: {e}")
+            return False
+    
+    def _start_enhanced_monitoring(self):
+        """Start enhanced health and performance monitoring"""
+        try:
+            self.logger.info("Starting enhanced monitoring...")
+            
+            # Start health monitor
+            self.health_monitor.start_monitoring()
+            
+            # Start connection manager if not already started
+            if self.connection_manager and not self.connection_manager.is_running:
+                result = self.connection_manager.start_connection()
+                if not result.success:
+                    self.logger.warning(f"Connection manager start warning: {result.error}")
+            
+            self.logger.info("Enhanced monitoring started successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start enhanced monitoring: {e}")
+    
+    def _stop_enhanced_monitoring(self):
+        """Stop enhanced monitoring components"""
+        try:
+            self.logger.info("Stopping enhanced monitoring...")
+            
+            # Stop health monitor
+            if self.health_monitor:
+                self.health_monitor.stop_monitoring()
+            
+            self.logger.info("Enhanced monitoring stopped successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to stop enhanced monitoring: {e}")
+    
+    def _on_connection_event(self, event):
+        """Handle connection events from connection manager"""
+        try:
+            self.logger.info(f"Connection event: {event.event_type} - {event.connection_state.value}")
+            
+            # Log connection event with enhanced log manager
+            self.log_connection_event(
+                event_type=event.event_type,
+                connection_state=event.connection_state.value,
+                details=event.details,
+                error_message=event.error_message
+            )
+            
+            # Update health monitor with connection event
+            self.health_monitor.record_connection_event(
+                event.event_type,
+                event.connection_state,
+                event.details,
+                event.error_message
+            )
+            
+            # Update GUI with connection event
+            if 'update_connection_event' in self.status_callbacks:
+                self.status_callbacks['update_connection_event'](
+                    event.event_type,
+                    event.connection_state.value,
+                    event.error_message or ""
+                )
+                
+        except Exception as e:
+            self.logger.error(f"Error handling connection event: {e}")
+            # Log the error with context
+            self.log_error_with_context(
+                component="gui_system_wrapper",
+                error=e,
+                context={"method": "_on_connection_event"},
+                user_action="connection_event_handling"
+            )
+    
+    def _on_health_metrics_update(self, health_metrics):
+        """Handle health metrics updates from connection manager"""
+        try:
+            # This is already handled by the health monitor callback
+            # Just log for debugging
+            self.logger.debug(f"Health metrics update: {health_metrics.health_status.value}")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling health metrics update: {e}")
+    
+    def _on_performance_report_callback(self, performance_report):
+        """Handle performance reports from connection manager"""
+        try:
+            # This is already handled by the health monitor callback
+            # Just log for debugging
+            self.logger.debug(f"Performance report: {performance_report.report_id}")
+            
+        except Exception as e:
+            self.logger.error(f"Error handling performance report callback: {e}")
     
     def _apply_gui_configuration(self):
         """Apply GUI configuration to production system"""
@@ -456,6 +1188,9 @@ class GuiSystemWrapper:
             return
         
         try:
+            # Apply MQTT configuration from GUI first
+            self._apply_mqtt_configuration()
+            
             # Apply individual mask files to each enabled camera
             self._apply_camera_mask_configurations()
             
@@ -472,6 +1207,93 @@ class GuiSystemWrapper:
             
         except Exception as e:
             self.logger.error(f"Failed to apply GUI configuration: {e}")
+    
+    def _apply_mqtt_configuration(self):
+        """Apply MQTT configuration from GUI to production system"""
+        try:
+            # Get effective MQTT config (GUI priority)
+            effective_mqtt = self.get_effective_mqtt_config()
+            
+            self.logger.info(f"Applying MQTT configuration: {effective_mqtt['broker_host']}:{effective_mqtt['broker_port']}")
+            
+            # Update production system's MQTT configuration
+            if hasattr(self.production_system, 'config') and hasattr(self.production_system.config, 'mqtt'):
+                # Disconnect existing MQTT client if connected
+                if hasattr(self.production_system, 'mqtt_client') and self.production_system.mqtt_client:
+                    try:
+                        if hasattr(self.production_system.mqtt_client, 'client') and self.production_system.mqtt_client.client:
+                            self.production_system.mqtt_client.client.disconnect()
+                            self.logger.info("Disconnected existing MQTT client")
+                        self.production_system.mqtt_client = None
+                    except Exception as e:
+                        self.logger.warning(f"Error disconnecting MQTT client: {e}")
+                
+                # Update the MQTT config object
+                self.production_system.config.mqtt.broker_host = effective_mqtt['broker_host']
+                self.production_system.config.mqtt.broker_port = effective_mqtt['broker_port']
+                self.production_system.config.mqtt.client_id = effective_mqtt['client_id']
+                self.production_system.config.mqtt.subscribe_topic = effective_mqtt['subscribe_topic']
+                self.production_system.config.mqtt.publish_topic = effective_mqtt['publish_topic']
+                self.production_system.config.mqtt.keepalive = effective_mqtt.get('keepalive', 60)
+                self.production_system.config.mqtt.max_reconnect_attempts = effective_mqtt.get('max_reconnect_attempts', 10)
+                self.production_system.config.mqtt.reconnect_delay = effective_mqtt.get('reconnect_delay', 5)
+                
+                self.logger.info(f"Updated production system MQTT config: {effective_mqtt['broker_host']}:{effective_mqtt['broker_port']}")
+                
+                # Re-initialize MQTT with new configuration
+                if hasattr(self.production_system, 'initialize_mqtt'):
+                    self.logger.info("Re-initializing MQTT client with new configuration...")
+                    mqtt_success = self.production_system.initialize_mqtt()
+                    if mqtt_success:
+                        self.logger.info(f"MQTT reconnected successfully: {effective_mqtt['broker_host']}:{effective_mqtt['broker_port']}")
+                        
+                        # Update GUI status
+                        if 'update_mqtt_status' in self.status_callbacks:
+                            self.status_callbacks['update_mqtt_status'](
+                                True, effective_mqtt['broker_host'], ""
+                            )
+                        return True
+                    else:
+                        error_msg = f"MQTT连接失败: {effective_mqtt['broker_host']}:{effective_mqtt['broker_port']}"
+                        self.logger.error(error_msg)
+                        
+                        # Update GUI status
+                        if 'update_mqtt_status' in self.status_callbacks:
+                            self.status_callbacks['update_mqtt_status'](
+                                False, effective_mqtt['broker_host'], error_msg
+                            )
+                        
+                        # Show error in GUI
+                        if 'show_error_message' in self.status_callbacks:
+                            self.status_callbacks['show_error_message'](
+                                "MQTT连接失败", error_msg
+                            )
+                        return False
+                else:
+                    self.logger.warning("Production system does not have initialize_mqtt method")
+                    return False
+                
+            else:
+                self.logger.warning("Production system MQTT config not found")
+                return False
+                
+        except Exception as e:
+            error_msg = f"Failed to apply MQTT configuration: {e}"
+            self.logger.error(error_msg)
+            
+            # Show error in GUI
+            if 'show_error_message' in self.status_callbacks:
+                self.status_callbacks['show_error_message'](
+                    "MQTT配置应用失败", str(e)
+                )
+            return False
+            self.logger.error(error_msg)
+            
+            # Show error in GUI
+            if 'show_error_message' in self.status_callbacks:
+                self.status_callbacks['show_error_message'](
+                    "MQTT配置应用失败", str(e)
+                )
     
     def _apply_camera_mask_configurations(self):
         """Apply individual mask files to each enabled camera"""
@@ -905,6 +1727,18 @@ class GuiSystemWrapper:
             config['gui_config']['cameras'] = camera_configs
             config['gui_config']['system_parameters'] = self.system_parameters
             
+            # Save MQTT configuration from GUI
+            config['gui_config']['mqtt'] = self.gui_mqtt_config.copy()
+            
+            # Also update main MQTT config section with GUI values
+            if 'mqtt' not in config:
+                config['mqtt'] = {}
+            
+            # Update main MQTT config with GUI values (for compatibility)
+            for key, value in self.gui_mqtt_config.items():
+                if value is not None and value != "":
+                    config['mqtt'][key] = value
+            
             # Update camera count
             if 'cameras' not in config:
                 config['cameras'] = {}
@@ -971,13 +1805,14 @@ class GuiSystemWrapper:
         return False
     
     def _status_monitoring_loop(self):
-        """Monitor system status and update GUI with timer-based polling"""
-        self.logger.info("Status monitoring started")
+        """Enhanced status monitoring with integrated MQTT reliability components"""
+        self.logger.info("Enhanced status monitoring started")
         
         # Initialize polling state
         last_mqtt_status = None
         last_camera_states = {}
         last_system_health = {}
+        last_connection_stats = {}
         
         while self.running:
             try:
@@ -987,8 +1822,9 @@ class GuiSystemWrapper:
                     
                     # Extract camera states, MQTT status, and system health
                     current_camera_states = status.get('camera_states', {})
-                    current_mqtt_status = self._extract_mqtt_status()
+                    current_mqtt_status = self._extract_enhanced_mqtt_status()
                     current_system_health = self._extract_system_health(status)
+                    current_connection_stats = self.get_connection_statistics()
                     
                     # Update GUI displays with current information only if changed
                     if current_mqtt_status != last_mqtt_status:
@@ -1002,6 +1838,13 @@ class GuiSystemWrapper:
                     if current_system_health != last_system_health:
                         self._update_system_health_display(current_system_health)
                         last_system_health = current_system_health.copy()
+                    
+                    if current_connection_stats != last_connection_stats:
+                        self._update_connection_statistics_display(current_connection_stats)
+                        last_connection_stats = current_connection_stats.copy()
+                    
+                    # Update message statistics for health monitor
+                    self._update_message_statistics()
                 
                 # Poll every 0.5 seconds for responsive updates
                 time.sleep(0.5)
@@ -1022,15 +1865,83 @@ class GuiSystemWrapper:
                 
                 time.sleep(1.0)
         
-        self.logger.info("Status monitoring stopped")
+        self.logger.info("Enhanced status monitoring stopped")
+    
+    def _extract_enhanced_mqtt_status(self) -> Dict:
+        """Extract enhanced MQTT status with reliability information"""
+        try:
+            # Get base MQTT status
+            mqtt_status = self._extract_mqtt_status()
+            
+            # Add enhanced information from connection manager
+            if self.connection_manager:
+                connection_status = self.connection_manager.get_connection_status()
+                mqtt_status.update({
+                    'enhanced_connection_state': connection_status.get('connection_state', 'unknown'),
+                    'health_status': connection_status.get('health_status', 'unknown'),
+                    'last_health_check': connection_status.get('last_health_check'),
+                    'connection_manager_running': connection_status.get('is_running', False)
+                })
+            
+            return mqtt_status
+            
+        except Exception as e:
+            self.logger.error(f"Enhanced MQTT status extraction failed: {e}")
+            return self._extract_mqtt_status()  # Fallback to basic status
+    
+    def _update_connection_statistics_display(self, stats: Dict):
+        """Update connection statistics display in GUI"""
+        try:
+            if 'update_connection_statistics' in self.status_callbacks:
+                self.status_callbacks['update_connection_statistics'](stats)
+                
+        except Exception as e:
+            self.logger.error(f"Connection statistics display update failed: {e}")
+    
+    def _update_message_statistics(self):
+        """Update message statistics for health monitoring"""
+        try:
+            if self.production_system and hasattr(self.production_system, 'mqtt_client'):
+                mqtt_client = self.production_system.mqtt_client
+                
+                # Get message counts (this would need to be implemented in the MQTT client)
+                # For now, we'll use placeholder values
+                sent_messages = 0
+                received_messages = 0
+                failed_messages = 0
+                
+                # Update health monitor with message statistics
+                if hasattr(mqtt_client, 'get_message_stats'):
+                    stats = mqtt_client.get_message_stats()
+                    sent_messages = stats.get('sent', 0)
+                    received_messages = stats.get('received', 0)
+                    failed_messages = stats.get('failed', 0)
+                
+                self.health_monitor.update_message_stats(
+                    sent=sent_messages,
+                    received=received_messages,
+                    failed=failed_messages
+                )
+                
+                # Update latency if available
+                if hasattr(mqtt_client, 'get_last_latency'):
+                    latency = mqtt_client.get_last_latency()
+                    if latency > 0:
+                        self.health_monitor.update_latency(latency)
+                        
+        except Exception as e:
+            self.logger.error(f"Message statistics update failed: {e}")
     
     def _extract_mqtt_status(self) -> Dict:
         """Extract MQTT status information from production system"""
         try:
+            # Get effective MQTT config (GUI优先)
+            effective_mqtt = self.get_effective_mqtt_config()
+            
             mqtt_status = {
                 'connected': False,
-                'broker_host': "192.168.10.80",  # From requirements
-                'client_id': "receiver",
+                'broker_host': effective_mqtt.get('broker_host', '192.168.10.80'),
+                'client_id': effective_mqtt.get('client_id', 'receiver'),
                 'last_message_time': None,
                 'connection_info': "未连接"
             }
@@ -1173,3 +2084,497 @@ class GuiSystemWrapper:
     def is_running(self) -> bool:
         """Check if system is running"""
         return self.running and self.production_system is not None
+    
+    def get_diagnostic_report_for_display(self) -> Dict[str, Any]:
+        """
+        Get formatted diagnostic report for GUI display.
+        
+        Returns:
+            Dict containing formatted diagnostic information
+        """
+        try:
+            if not self.last_diagnostic_report:
+                return {
+                    'status': 'no_report',
+                    'message': '尚未运行诊断检查',
+                    'recommendations': ['点击"运行诊断"按钮开始检查']
+                }
+            
+            report = self.last_diagnostic_report
+            
+            # Format network test results
+            network_info = "未测试"
+            if report.network_test:
+                if report.network_test.is_successful:
+                    network_info = f"连接成功 ({report.network_test.response_time_ms:.1f}ms)"
+                else:
+                    network_info = f"连接失败: {report.network_test.error_message}"
+            
+            # Format broker test results
+            broker_info = "未测试"
+            if report.broker_test:
+                if report.broker_test.is_successful:
+                    broker_info = f"代理可用 ({report.broker_test.connection_time_ms:.1f}ms)"
+                else:
+                    broker_info = f"代理不可用: {report.broker_test.error_message}"
+            
+            # Format configuration validation results
+            config_info = "未验证"
+            if report.config_validation:
+                if report.config_validation.is_valid:
+                    config_info = "配置有效"
+                else:
+                    config_info = f"配置无效: {report.config_validation.error_message}"
+            
+            return {
+                'status': report.overall_status.value if hasattr(report.overall_status, 'value') else str(report.overall_status),
+                'timestamp': report.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                'network_test': network_info,
+                'broker_test': broker_info,
+                'config_validation': config_info,
+                'recommendations': report.recommendations,
+                'is_successful': report.is_successful
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error formatting diagnostic report for display: {e}")
+            return {
+                'status': 'error',
+                'message': f'诊断报告格式化失败: {str(e)}',
+                'recommendations': ['请重新运行诊断检查']
+            }
+    
+    def get_performance_report_for_display(self) -> Dict[str, Any]:
+        """
+        Get formatted performance report for GUI display.
+        
+        Returns:
+            Dict containing formatted performance information
+        """
+        try:
+            if not self.current_performance_report:
+                return {
+                    'status': 'no_report',
+                    'message': '性能报告尚未生成',
+                    'recommendations': ['系统运行一段时间后将自动生成性能报告']
+                }
+            
+            report = self.current_performance_report
+            
+            # Format connection metrics
+            metrics = report.connection_metrics
+            connection_info = {
+                'uptime': f"{metrics.connection_uptime:.1f} 秒",
+                'success_rate': f"{metrics.message_success_rate:.1f}%",
+                'latency': f"{metrics.average_latency:.1f} ms",
+                'reconnections': metrics.reconnection_count,
+                'quality_score': f"{metrics.quality_score:.1f}/100"
+            }
+            
+            # Format health metrics
+            health = report.health_metrics
+            health_info = {
+                'status': health.health_status.value,
+                'connection_state': health.connection_state.value,
+                'error_count': health.error_count,
+                'warning_count': health.warning_count,
+                'system_load': f"{health.system_load:.1f}%",
+                'memory_usage': f"{health.memory_usage:.1f}%"
+            }
+            
+            return {
+                'status': 'available',
+                'report_id': report.report_id,
+                'timestamp': report.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                'time_period': report.time_period,
+                'connection_metrics': connection_info,
+                'health_metrics': health_info,
+                'trend_analysis': report.trend_analysis,
+                'recommendations': report.recommendations
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error formatting performance report for display: {e}")
+            return {
+                'status': 'error',
+                'message': f'性能报告格式化失败: {str(e)}',
+                'recommendations': ['请检查系统状态']
+            }
+    
+    def get_connection_health_summary(self) -> Dict[str, Any]:
+        """
+        Get connection health summary for GUI display.
+        
+        Returns:
+            Dict containing connection health summary
+        """
+        try:
+            summary = {
+                'overall_status': 'unknown',
+                'connection_state': 'disconnected',
+                'health_level': 'unknown',
+                'quality_score': 0.0,
+                'issues': [],
+                'recommendations': [],
+                'last_update': datetime.now().strftime("%H:%M:%S")
+            }
+            
+            # Get health metrics
+            if self.current_health_metrics:
+                health = self.current_health_metrics
+                summary.update({
+                    'overall_status': health.health_status.value,
+                    'connection_state': health.connection_state.value,
+                    'health_level': health.get_status_summary(),
+                    'error_count': health.error_count,
+                    'warning_count': health.warning_count
+                })
+            
+            # Get connection statistics
+            stats = self.get_connection_statistics()
+            if stats:
+                summary.update({
+                    'quality_score': stats.get('quality_score', 0.0),
+                    'uptime': stats.get('uptime', 0.0),
+                    'success_rate': stats.get('message_success_rate', 0.0),
+                    'latency': stats.get('average_latency', 0.0)
+                })
+            
+            # Get quality report if available
+            if hasattr(self.health_monitor, 'check_connection_quality'):
+                try:
+                    quality_report = self.health_monitor.check_connection_quality()
+                    summary.update({
+                        'quality_score': quality_report.overall_quality,
+                        'issues': quality_report.issues_detected,
+                        'recommendations': quality_report.recommendations
+                    })
+                except Exception as e:
+                    self.logger.debug(f"Could not get quality report: {e}")
+            
+            return summary
+            
+        except Exception as e:
+            self.logger.error(f"Error getting connection health summary: {e}")
+            return {
+                'overall_status': 'error',
+                'connection_state': 'error',
+                'health_level': f'获取健康状态失败: {str(e)}',
+                'quality_score': 0.0,
+                'issues': [str(e)],
+                'recommendations': ['请检查系统配置'],
+                'last_update': datetime.now().strftime("%H:%M:%S")
+            }
+    
+    # ===== Enhanced Log Management Methods =====
+    
+    def log_connection_event(self, event_type: str, connection_state: str, 
+                           details: Optional[Dict[str, Any]] = None, 
+                           error_message: Optional[str] = None) -> str:
+        """
+        Log MQTT connection event with detailed information.
+        
+        Args:
+            event_type: Type of connection event (connect, disconnect, reconnect, error)
+            connection_state: Current connection state
+            details: Additional event details
+            error_message: Error message if applicable
+            
+        Returns:
+            Log entry ID
+        """
+        try:
+            return self.log_manager.log_connection_event(
+                event_type=event_type,
+                connection_state=connection_state,
+                details=details,
+                error_message=error_message
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to log connection event: {e}")
+            return ""
+    
+    def log_performance_event(self, metric_name: str, metric_value: float,
+                            threshold: Optional[float] = None,
+                            details: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Log performance-related event.
+        
+        Args:
+            metric_name: Name of the performance metric
+            metric_value: Current value of the metric
+            threshold: Threshold value if applicable
+            details: Additional performance details
+            
+        Returns:
+            Log entry ID
+        """
+        try:
+            return self.log_manager.log_performance_event(
+                metric_name=metric_name,
+                metric_value=metric_value,
+                threshold=threshold,
+                details=details
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to log performance event: {e}")
+            return ""
+    
+    def log_error_with_context(self, component: str, error: Exception,
+                             context: Optional[Dict[str, Any]] = None,
+                             user_action: Optional[str] = None) -> str:
+        """
+        Log error with full context and stack trace.
+        
+        Args:
+            component: Component where error occurred
+            error: Exception object
+            context: Additional context information
+            user_action: User action that triggered the error
+            
+        Returns:
+            Log entry ID
+        """
+        try:
+            return self.log_manager.log_error_with_context(
+                component=component,
+                error=error,
+                context=context,
+                user_action=user_action
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to log error with context: {e}")
+            return ""
+    
+    def search_logs(self, search_text: Optional[str] = None,
+                   level_filter: Optional[LogLevel] = None,
+                   category_filter: Optional[LogCategory] = None,
+                   component_filter: Optional[str] = None,
+                   time_range_hours: Optional[int] = None,
+                   max_results: int = 500) -> List[Dict[str, Any]]:
+        """
+        Search logs and return formatted results for GUI display.
+        
+        Args:
+            search_text: Text to search in log messages
+            level_filter: Filter by log level
+            category_filter: Filter by category
+            component_filter: Filter by component
+            time_range_hours: Limit to last N hours
+            max_results: Maximum results to return
+            
+        Returns:
+            List of formatted log entries for GUI display
+        """
+        try:
+            display_entries = self.log_viewer.search_and_display(
+                search_text=search_text,
+                level_filter=level_filter,
+                category_filter=category_filter,
+                component_filter=component_filter,
+                time_range_hours=time_range_hours,
+                max_results=max_results
+            )
+            
+            # Convert to GUI-friendly format
+            return self.log_viewer_gui.get_display_data_for_table()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to search logs: {e}")
+            return []
+    
+    def get_recent_logs(self, count: int = 100, 
+                       component: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get recent log entries formatted for GUI display.
+        
+        Args:
+            count: Number of recent entries
+            component: Filter by component
+            
+        Returns:
+            List of formatted log entries
+        """
+        try:
+            display_entries = self.log_viewer.get_recent_logs(count, component)
+            return self.log_viewer_gui.get_display_data_for_table()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get recent logs: {e}")
+            return []
+    
+    def get_log_table_headers(self) -> List[str]:
+        """
+        Get table headers for log display in GUI.
+        
+        Returns:
+            List of column headers
+        """
+        try:
+            return self.log_viewer_gui.get_table_headers()
+        except Exception as e:
+            self.logger.error(f"Failed to get log table headers: {e}")
+            return ["时间", "级别", "组件", "消息"]
+    
+    def get_log_entry_details(self, entry_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed information for a specific log entry.
+        
+        Args:
+            entry_id: Log entry ID
+            
+        Returns:
+            Detailed entry information or None if not found
+        """
+        try:
+            return self.log_viewer_gui.get_entry_details(entry_id)
+        except Exception as e:
+            self.logger.error(f"Failed to get log entry details: {e}")
+            return None
+    
+    def get_error_summary(self, hours: int = 24) -> Dict[str, Any]:
+        """
+        Get formatted error summary for display.
+        
+        Args:
+            hours: Time period in hours
+            
+        Returns:
+            Formatted error summary
+        """
+        try:
+            return self.log_viewer.get_error_summary_display(hours)
+        except Exception as e:
+            self.logger.error(f"Failed to get error summary: {e}")
+            return {"error": f"获取错误摘要失败: {str(e)}"}
+    
+    def get_log_statistics(self) -> Dict[str, Any]:
+        """
+        Get statistics about current log view.
+        
+        Returns:
+            Statistics dictionary
+        """
+        try:
+            return self.log_viewer.get_log_statistics()
+        except Exception as e:
+            self.logger.error(f"Failed to get log statistics: {e}")
+            return {"total_entries": 0, "error": str(e)}
+    
+    def export_logs(self, format_type: str = "json", 
+                   filename: Optional[str] = None) -> str:
+        """
+        Export currently displayed logs.
+        
+        Args:
+            format_type: Export format (json, csv, txt)
+            filename: Output filename
+            
+        Returns:
+            Path to exported file
+        """
+        try:
+            return self.log_viewer.export_current_view(format_type, filename)
+        except Exception as e:
+            self.logger.error(f"Failed to export logs: {e}")
+            return ""
+    
+    def start_log_auto_refresh(self) -> None:
+        """Start automatic refresh of log display."""
+        try:
+            self.log_viewer.start_auto_refresh()
+        except Exception as e:
+            self.logger.error(f"Failed to start log auto refresh: {e}")
+    
+    def stop_log_auto_refresh(self) -> None:
+        """Stop automatic refresh of log display."""
+        try:
+            self.log_viewer.stop_auto_refresh()
+        except Exception as e:
+            self.logger.error(f"Failed to stop log auto_refresh: {e}")
+    
+    def cleanup_old_logs(self, retention_days: int = 30) -> int:
+        """
+        Clean up log files older than retention period.
+        
+        Args:
+            retention_days: Number of days to retain logs
+            
+        Returns:
+            Number of files cleaned up
+        """
+        try:
+            return self.log_manager.cleanup_old_logs(retention_days)
+        except Exception as e:
+            self.logger.error(f"Failed to cleanup old logs: {e}")
+            return 0
+    
+    def compress_rotated_logs(self) -> int:
+        """
+        Compress rotated log files to save space.
+        
+        Returns:
+            Number of files compressed
+        """
+        try:
+            return self.log_manager.compress_rotated_logs()
+        except Exception as e:
+            self.logger.error(f"Failed to compress rotated logs: {e}")
+            return 0
+    
+    def get_log_search_interface_data(self) -> Dict[str, Any]:
+        """
+        Get data structure for GUI log search interface.
+        
+        Returns:
+            Search interface configuration data
+        """
+        try:
+            return self.log_viewer_gui.create_search_interface_data()
+        except Exception as e:
+            self.logger.error(f"Failed to get log search interface data: {e}")
+            return {
+                "log_levels": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                "categories": ["system", "connection", "performance", "configuration", "error", "diagnostic"],
+                "components": [],
+                "time_ranges": [
+                    {"label": "过去1小时", "hours": 1},
+                    {"label": "过去24小时", "hours": 24}
+                ],
+                "export_formats": [
+                    {"label": "JSON", "value": "json"},
+                    {"label": "CSV", "value": "csv"}
+                ]
+            }
+    
+    def shutdown(self):
+        """Enhanced shutdown with log management cleanup"""
+        try:
+            # Stop log auto refresh
+            self.stop_log_auto_refresh()
+            
+            # Shutdown log manager
+            if hasattr(self, 'log_manager'):
+                self.log_manager.shutdown()
+            
+            # Original shutdown logic
+            self.running = False
+            
+            if self.production_system:
+                self.production_system.stop()
+                self.production_system = None
+            
+            if self.connection_manager:
+                self.connection_manager.disconnect()
+                self.connection_manager = None
+            
+            if self.health_monitor:
+                self.health_monitor.stop_monitoring()
+            
+            if self.status_thread and self.status_thread.is_alive():
+                self.status_thread.join(timeout=5.0)
+            
+            self.logger.info("Enhanced GUI System Wrapper shutdown complete")
+            
+        except Exception as e:
+            self.logger.error(f"Error during shutdown: {e}")
