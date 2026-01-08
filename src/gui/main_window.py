@@ -1,19 +1,23 @@
 import cv2
+import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
                                QLabel, QScrollArea, QMessageBox)
 from PySide6.QtGui import QImage
 from PySide6.QtCore import Slot, Qt
 
-from src.gui.widgets import ImageDisplay, LogViewer, CameraControlWidget
+from src.gui.widgets import ImageDisplay, LogViewer, CameraControlWidget, MqttConfigWidget
 from src.core.camera import CameraThread
 from src.core.processor import ImageProcessor
+from src.core.mqtt_client import MqttWorker
 from src.utils.logger import app_logger, SignallingLogHandler
+from src.utils.config import ConfigManager
 import logging
+import time
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Camer - Multi-Camera Monitoring System")
+        self.setWindowTitle("Camer - 多摄像头监控系统")
         self.resize(1400, 900)
         
         # Multi-Camera Systems
@@ -22,6 +26,17 @@ class MainWindow(QMainWindow):
         self.displays = []
         self.controls = []
         self.need_baseline_flags = [False] * 3
+        self.last_scan_times = [0.0] * 3
+        
+        # Config Manager
+        self.config_manager = ConfigManager()
+        
+        # MQTT
+        broker = self.config_manager.get_mqtt_broker()
+        subscribe_topics = self.config_manager.get_subscribe_topics()
+        publish_topic = self.config_manager.get_publish_topic()
+        self.mqtt_worker = MqttWorker(broker=broker, topics=subscribe_topics, publish_topic=publish_topic)
+        self.mqtt_worker.start()
         
         # Setup Logger to GUI
         self.log_handler = SignallingLogHandler()
@@ -29,8 +44,9 @@ class MainWindow(QMainWindow):
         
         self.init_ui()
         self.init_logic()
+        self.load_config()
         
-        app_logger.info("Application Initialized. 3-Camera Support Ready.")
+        app_logger.info("程序已初始化。三路摄像头支持已就绪。")
 
     def init_ui(self):
         central_widget = QWidget()
@@ -42,7 +58,11 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left_panel)
         left_panel.setFixedWidth(280)
         
-        left_layout.addWidget(QLabel("<h3>Camera Controls</h3>"))
+        left_layout.addWidget(QLabel("<h3>摄像头控制</h3>"))
+        
+        self.mqtt_config = MqttConfigWidget()
+        left_layout.addWidget(self.mqtt_config)
+        
         for i in range(3):
             ctrl = CameraControlWidget(i)
             self.controls.append(ctrl)
@@ -59,10 +79,10 @@ class MainWindow(QMainWindow):
         
         for i in range(3):
             display = ImageDisplay()
-            display.setText(f"Camera {i+1} Off")
+            display.setText(f"摄像头 {i+1} 已关闭")
             self.displays.append(display)
             center_layout.addWidget(display)
-            center_layout.addWidget(QLabel(f"Monitor {i+1}"))
+            center_layout.addWidget(QLabel(f"监控画面 {i+1}"))
             
         center_scroll.setWidget(center_widget)
         main_layout.addWidget(center_scroll, stretch=3)
@@ -100,12 +120,84 @@ class MainWindow(QMainWindow):
             ctrl.activated.connect(lambda active, idx=i: self.toggle_camera(active, idx))
             ctrl.mask_changed.connect(lambda path, idx=i: self.on_mask_changed(path, idx))
             ctrl.reset_baseline.connect(lambda idx=i: self.on_reset_baseline(idx))
+            ctrl.threshold_changed.connect(lambda val, idx=i: self.on_threshold_changed(val, idx))
+            ctrl.min_area_changed.connect(lambda val, idx=i: self.on_min_area_changed(val, idx))
+
+        # MQTT Signal
+        self.mqtt_config.config_updated.connect(self.on_mqtt_config_updated)
+        self.mqtt_worker.reset_signal.connect(self.on_mqtt_trigger)
+        self.mqtt_worker.status_changed.connect(self.mqtt_config.update_status)
+
+    def load_config(self):
+        """从配置管理器加载配置并应用到UI"""
+        # 加载 MQTT 配置
+        broker = self.config_manager.get_mqtt_broker()
+        self.mqtt_config.edit_broker.setText(broker)
+        
+        # 加载订阅主题
+        subscribe_topics = self.config_manager.get_subscribe_topics()
+        self.mqtt_config.edit_subscribe.setText(",".join(subscribe_topics))
+        
+        # 加载发布主题
+        publish_topic = self.config_manager.get_publish_topic()
+        self.mqtt_config.edit_publish.setText(publish_topic)
+        
+        # 加载摄像头配置
+        for i in range(3):
+            cam_config = self.config_manager.get_camera_config(i)
+            if cam_config:
+                ctrl = self.controls[i]
+                
+                # 设置激活状态（不触发信号）
+                ctrl.check_active.blockSignals(True)
+                ctrl.check_active.setChecked(cam_config.get("active", False))
+                ctrl.check_active.blockSignals(False)
+                
+                # 设置掩码
+                mask = cam_config.get("mask", "")
+                if mask:
+                    index = ctrl.combo_mask.findText(os.path.basename(mask))
+                    if index >= 0:
+                        ctrl.combo_mask.setCurrentIndex(index)
+                
+                # 设置阈值
+                ctrl.slider_thresh.blockSignals(True)
+                ctrl.slider_thresh.setValue(cam_config.get("threshold", 50))
+                ctrl.slider_thresh.blockSignals(False)
+                
+                # 设置最小面积
+                ctrl.slider_area.blockSignals(True)
+                ctrl.slider_area.setValue(cam_config.get("min_area", 500))
+                ctrl.slider_area.blockSignals(False)
+                
+                # 应用到处理器
+                self.processors[i].threshold = cam_config.get("threshold", 50)
+                self.processors[i].min_area = cam_config.get("min_area", 500)
+                
+                # 如果掩码路径存在，应用到处理器
+                if mask and os.path.exists(mask):
+                    self.processors[i].set_mask(mask)
+        
+        app_logger.info("配置加载完成。")
+
+    def on_mqtt_config_updated(self, broker, subscribe_topics, publish_topic):
+        app_logger.info(f"正在更新 MQTT 配置 - Broker: {broker}, 订阅: {subscribe_topics}, 发布: {publish_topic}")
+        self.config_manager.set_mqtt_broker(broker)
+        self.config_manager.set_subscribe_topics(subscribe_topics)
+        self.config_manager.set_publish_topic(publish_topic)
+        self.mqtt_worker.reconnect(broker, subscribe_topics, publish_topic)
+
+    def on_mqtt_trigger(self):
+        """Triggered by MQTT to reset all baselines"""
+        app_logger.info("收到 MQTT 触发信号：重置所有摄像头基准。")
+        for i in range(3):
+            self.on_reset_baseline(i)
 
     def handle_camera_error(self, err, idx):
-        app_logger.error(f"Cam {idx+1}: {err}")
+        app_logger.error(f"摄像头 {idx+1}: {err}")
         # Only show popup for critical "Cannot open" errors
         if "Cannot open" in err:
-            QMessageBox.warning(self, "Camera Error", f"Failed to activate Camera {idx+1}.\n{err}")
+            QMessageBox.warning(self, "摄像头错误", f"无法激活摄像头 {idx+1}。\n{err}")
             # Reset checkbox
             self.controls[idx].check_active.setChecked(False)
 
@@ -115,23 +207,39 @@ class MainWindow(QMainWindow):
         if active:
             if not cam.isRunning():
                 cam.start()
-                app_logger.info(f"Camera {idx+1} activation requested...")
+                app_logger.info(f"正在请求激活摄像头 {idx+1}...")
         else:
             if cam.isRunning():
                 cam.stop()
-                self.displays[idx].setText(f"Camera {idx+1} Disconnected")
-                app_logger.info(f"Camera {idx+1} deactivated.")
+                self.displays[idx].setText(f"摄像头 {idx+1} 已断开连接")
+                app_logger.info(f"摄像头 {idx+1} 已停用。")
+        
+        # 保存配置
+        self.config_manager.set_camera_active(idx, active)
 
 
     @Slot(str, int)
     def on_mask_changed(self, path, idx):
         self.processors[idx].set_mask(path)
-        app_logger.info(f"Camera {idx+1} mask updated.")
+        self.config_manager.set_camera_mask(idx, path)
+        app_logger.info(f"摄像头 {idx+1} 遮罩已更新。")
+
+    @Slot(int, int)
+    def on_threshold_changed(self, val, idx):
+        self.processors[idx].threshold = val
+        self.config_manager.set_camera_threshold(idx, val)
+        app_logger.debug(f"摄像头 {idx+1} 阈值已更新为: {val}")
+
+    @Slot(int, int)
+    def on_min_area_changed(self, val, idx):
+        self.processors[idx].min_area = val
+        self.config_manager.set_camera_min_area(idx, val)
+        app_logger.debug(f"摄像头 {idx+1} 最小面积已更新为: {val}")
 
     @Slot(int)
     def on_reset_baseline(self, idx):
         self.need_baseline_flags[idx] = True
-        app_logger.info(f"Camera {idx+1} baseline reset requested.")
+        app_logger.info(f"摄像头 {idx+1} 基准重置请求已发送。")
 
     @Slot(object, int)
     def process_frame(self, frame, idx):
@@ -146,7 +254,19 @@ class MainWindow(QMainWindow):
         # 2. Process
         vis_frame, is_triggered, diff_val = processor.process(frame)
         
-        # 3. Display Image (Convert BGR to RGB to QImage)
+        # 3. ROI Brightness Scan (Every 300ms)
+        current_time = time.time()
+        if (current_time - self.last_scan_times[idx]) >= 0.3:
+            self.last_scan_times[idx] = current_time
+            if processor.baseline_brightness is not None:
+                curr_brightness = processor.get_current_brightness(frame)
+                # 使用处理器的 threshold 参数作为亮度变化的阈值
+                if abs(curr_brightness - processor.baseline_brightness) > processor.threshold:
+                    publish_topic = self.config_manager.get_publish_topic()
+                    self.mqtt_worker.publish(publish_topic, "")
+                    # app_logger.debug(f"摄像头 {idx+1} 亮度变化触发：{curr_brightness:.2f} (基准: {processor.baseline_brightness:.2f})")
+
+        # 4. Display Image (Convert BGR to RGB to QImage)
         rgb_frame = cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
         bytes_per_line = ch * w
@@ -155,6 +275,7 @@ class MainWindow(QMainWindow):
         display.update_image(q_img)
 
     def closeEvent(self, event):
+        self.mqtt_worker.stop()
         for cam in self.cameras:
             cam.stop()
         super().closeEvent(event)

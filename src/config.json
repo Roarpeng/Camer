@@ -1,0 +1,30 @@
+{
+    "mqtt": {
+        "broker": "192.168.100.214",
+        "subscribe_topics": [
+            "changeState",
+            "receiver"
+        ],
+        "publish_topic": "receiver"
+    },
+    "cameras": [
+        {
+            "active": true,
+            "mask": "C:\\Users\\vboxuser\\Desktop\\Project\\Camer\\data\\1.png",
+            "threshold": 50,
+            "min_area": 500
+        },
+        {
+            "active": false,
+            "mask": "",
+            "threshold": 50,
+            "min_area": 500
+        },
+        {
+            "active": false,
+            "mask": "",
+            "threshold": 50,
+            "min_area": 500
+        }
+    ]
+}

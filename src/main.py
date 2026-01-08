@@ -9,12 +9,13 @@ if project_root not in sys.path:
 
 from PySide6.QtWidgets import QApplication
 from src.gui.main_window import MainWindow
+from src.gui.style import MATERIAL_STYLE
 
 def main():
     app = QApplication(sys.argv)
     
-    # Optional: Apply Fusion style for better look
-    app.setStyle("Fusion")
+    # Apply Material Design Style
+    app.setStyleSheet(MATERIAL_STYLE)
     
     window = MainWindow()
     window.show()
