@@ -1,7 +1,7 @@
 {
     "mqtt": {
-        "broker": "localhost",
-        "client_id": "camer",
+        "broker": "192.168.100.214",
+        "client_id": "camera",
         "subscribe_topics": [
             "changeState",
             "receiver"
