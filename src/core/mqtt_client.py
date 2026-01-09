@@ -9,13 +9,14 @@ class MqttWorker(QObject):
     reset_signal = Signal()
     status_changed = Signal(bool, str)
     
-    def __init__(self, broker="localhost", port=1883, topics=["changeState", "receiver"], publish_topic="receiver"):
+    def __init__(self, broker="localhost", port=1883, client_id="camer", topics=["changeState", "receiver"], publish_topic="receiver"):
         super().__init__()
         self.broker = broker
         self.port = port
+        self.client_id_str = client_id
         self.topics = topics
         self.publish_topic = publish_topic
-        self.client = mqtt.Client(client_id="camer")
+        self.client = mqtt.Client(client_id=client_id)
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         self.client.on_publish = self.on_publish
@@ -79,10 +80,16 @@ class MqttWorker(QObject):
         """发布成功的回调"""
         logger.info(f"消息发布成功，Message ID: {mid}")
 
-    def reconnect(self, broker, port=1883, subscribe_topics=None, publish_topic=None):
+    def reconnect(self, broker, port=1883, client_id=None, subscribe_topics=None, publish_topic=None):
         self.stop()
         self.broker = broker
         self.port = port
+        if client_id is not None:
+            self.client_id_str = client_id
+            self.client = mqtt.Client(client_id=client_id)
+            self.client.on_connect = self.on_connect
+            self.client.on_message = self.on_message
+            self.client.on_publish = self.on_publish
         if subscribe_topics is not None:
             self.topics = subscribe_topics
         if publish_topic is not None:

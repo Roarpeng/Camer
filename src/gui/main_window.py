@@ -2,7 +2,7 @@ import cv2
 import os
 from PySide6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
                                QLabel, QScrollArea, QMessageBox)
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QPainter
 from PySide6.QtCore import Slot, Qt
 
 from src.gui.widgets import ImageDisplay, LogViewer, CameraControlWidget, MqttConfigWidget
@@ -19,6 +19,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Camer - 多摄像头监控系统")
         self.resize(1400, 900)
+        self.setMinimumSize(1000, 600)  # 设置最小尺寸，但允许更大
         
         # Multi-Camera Systems
         self.cameras = []
@@ -27,15 +28,18 @@ class MainWindow(QMainWindow):
         self.controls = []
         self.need_baseline_flags = [False] * 3
         self.last_scan_times = [0.0] * 3
+        self.brightness_reported_flags = [False] * 3
+        self.scan_intervals = [300] * 3  # 默认300ms
         
         # Config Manager
         self.config_manager = ConfigManager()
         
         # MQTT
         broker = self.config_manager.get_mqtt_broker()
+        client_id = self.config_manager.get_client_id()
         subscribe_topics = self.config_manager.get_subscribe_topics()
         publish_topic = self.config_manager.get_publish_topic()
-        self.mqtt_worker = MqttWorker(broker=broker, topics=subscribe_topics, publish_topic=publish_topic)
+        self.mqtt_worker = MqttWorker(broker=broker, client_id=client_id, topics=subscribe_topics, publish_topic=publish_topic)
         self.mqtt_worker.start()
         
         # Setup Logger to GUI
@@ -53,12 +57,22 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
         
-        # --- Left Panel: Controls ---
+        # --- Left Panel: Controls with Scroll Area ---
+        left_scroll = QScrollArea()
+        left_scroll.setFixedWidth(340)  # Slightly wider to account for scrollbar
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        left_scroll.setFrameShape(QScrollArea.NoFrame)
+        
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_panel.setFixedWidth(280)
+        left_layout.setSpacing(0)  # Spacing handled by the widgets themselves
+        left_layout.setContentsMargins(0, 0, 0, 0)
         
-        left_layout.addWidget(QLabel("<h3>摄像头控制</h3>"))
+        label_title = QLabel("摄像头控制")
+        label_title.setProperty("h3", True)
+        label_title.setContentsMargins(16, 16, 16, 0)
+        left_layout.addWidget(label_title)
         
         self.mqtt_config = MqttConfigWidget()
         left_layout.addWidget(self.mqtt_config)
@@ -69,7 +83,8 @@ class MainWindow(QMainWindow):
             left_layout.addWidget(ctrl)
         
         left_layout.addStretch()
-        main_layout.addWidget(left_panel)
+        left_scroll.setWidget(left_panel)
+        main_layout.addWidget(left_scroll)
         
         # --- Center Panel: Monitors ---
         center_scroll = QScrollArea()
@@ -122,9 +137,11 @@ class MainWindow(QMainWindow):
             ctrl.reset_baseline.connect(lambda idx=i: self.on_reset_baseline(idx))
             ctrl.threshold_changed.connect(lambda val, idx=i: self.on_threshold_changed(val, idx))
             ctrl.min_area_changed.connect(lambda val, idx=i: self.on_min_area_changed(val, idx))
+            ctrl.scan_interval_changed.connect(lambda val, idx=i: self.on_scan_interval_changed(val, idx))
 
         # MQTT Signal
         self.mqtt_config.config_updated.connect(self.on_mqtt_config_updated)
+        self.mqtt_config.auto_connect_changed.connect(self.on_auto_connect_changed)
         self.mqtt_worker.reset_signal.connect(self.on_mqtt_trigger)
         self.mqtt_worker.status_changed.connect(self.mqtt_config.update_status)
 
@@ -134,6 +151,10 @@ class MainWindow(QMainWindow):
         broker = self.config_manager.get_mqtt_broker()
         self.mqtt_config.edit_broker.setText(broker)
         
+        # 加载 Client ID
+        client_id = self.config_manager.get_client_id()
+        self.mqtt_config.edit_client_id.setText(client_id)
+        
         # 加载订阅主题
         subscribe_topics = self.config_manager.get_subscribe_topics()
         self.mqtt_config.edit_subscribe.setText(",".join(subscribe_topics))
@@ -141,6 +162,17 @@ class MainWindow(QMainWindow):
         # 加载发布主题
         publish_topic = self.config_manager.get_publish_topic()
         self.mqtt_config.edit_publish.setText(publish_topic)
+        
+        # 加载自动连接配置
+        auto_connect = self.config_manager.get_auto_connect()
+        self.mqtt_config.check_auto_connect.blockSignals(True)
+        self.mqtt_config.check_auto_connect.setChecked(auto_connect)
+        self.mqtt_config.check_auto_connect.blockSignals(False)
+        
+        # 如果配置为自动连接，则自动连接 broker
+        if auto_connect:
+            app_logger.info("配置为自动连接，正在连接 MQTT Broker...")
+            self.mqtt_worker.reconnect(broker=broker, client_id=client_id, subscribe_topics=subscribe_topics, publish_topic=publish_topic)
         
         # 加载摄像头配置
         for i in range(3):
@@ -170,22 +202,39 @@ class MainWindow(QMainWindow):
                 ctrl.slider_area.setValue(cam_config.get("min_area", 500))
                 ctrl.slider_area.blockSignals(False)
                 
+                # 设置扫描间隔
+                ctrl.slider_interval.blockSignals(True)
+                ctrl.slider_interval.setValue(cam_config.get("scan_interval", 300))
+                ctrl.slider_interval.blockSignals(False)
+                
                 # 应用到处理器
                 self.processors[i].threshold = cam_config.get("threshold", 50)
                 self.processors[i].min_area = cam_config.get("min_area", 500)
+                self.scan_intervals[i] = cam_config.get("scan_interval", 300)
                 
                 # 如果掩码路径存在，应用到处理器
                 if mask and os.path.exists(mask):
                     self.processors[i].set_mask(mask)
+                
+                # 如果配置为激活，则自动激活摄像头
+                if cam_config.get("active", False):
+                    app_logger.info(f"配置为自动激活，正在启动摄像头 {i+1}...")
+                    self.toggle_camera(True, i)
         
         app_logger.info("配置加载完成。")
 
-    def on_mqtt_config_updated(self, broker, subscribe_topics, publish_topic):
-        app_logger.info(f"正在更新 MQTT 配置 - Broker: {broker}, 订阅: {subscribe_topics}, 发布: {publish_topic}")
+    def on_mqtt_config_updated(self, broker, client_id, subscribe_topics, publish_topic):
+        app_logger.info(f"正在更新 MQTT 配置 - Broker: {broker}, Client ID: {client_id}, 订阅: {subscribe_topics}, 发布: {publish_topic}")
         self.config_manager.set_mqtt_broker(broker)
+        self.config_manager.set_client_id(client_id)
         self.config_manager.set_subscribe_topics(subscribe_topics)
         self.config_manager.set_publish_topic(publish_topic)
-        self.mqtt_worker.reconnect(broker, subscribe_topics, publish_topic)
+        self.mqtt_worker.reconnect(broker=broker, client_id=client_id, subscribe_topics=subscribe_topics, publish_topic=publish_topic)
+
+    @Slot(bool)
+    def on_auto_connect_changed(self, auto_connect):
+        self.config_manager.set_auto_connect(auto_connect)
+        app_logger.info(f"自动连接设置已更新: {auto_connect}")
 
     def on_mqtt_trigger(self):
         """Triggered by MQTT to reset all baselines"""
@@ -236,9 +285,16 @@ class MainWindow(QMainWindow):
         self.config_manager.set_camera_min_area(idx, val)
         app_logger.debug(f"摄像头 {idx+1} 最小面积已更新为: {val}")
 
+    @Slot(int, int)
+    def on_scan_interval_changed(self, val, idx):
+        self.scan_intervals[idx] = val
+        self.config_manager.set_camera_scan_interval(idx, val)
+        app_logger.info(f"摄像头 {idx+1} 扫描间隔已更新为: {val}ms")
+
     @Slot(int)
     def on_reset_baseline(self, idx):
         self.need_baseline_flags[idx] = True
+        self.brightness_reported_flags[idx] = False
         app_logger.info(f"摄像头 {idx+1} 基准重置请求已发送。")
 
     @Slot(object, int)
@@ -254,17 +310,21 @@ class MainWindow(QMainWindow):
         # 2. Process
         vis_frame, is_triggered, diff_val = processor.process(frame)
         
-        # 3. ROI Brightness Scan (Every 300ms)
+        # 3. ROI Brightness Scan (使用配置的扫描间隔)
         current_time = time.time()
-        if (current_time - self.last_scan_times[idx]) >= 0.3:
+        scan_interval_sec = self.scan_intervals[idx] / 1000.0  # 转换为秒
+        if (current_time - self.last_scan_times[idx]) >= scan_interval_sec:
             self.last_scan_times[idx] = current_time
             if processor.baseline_brightness is not None:
                 curr_brightness = processor.get_current_brightness(frame)
                 # 使用处理器的 threshold 参数作为亮度变化的阈值
                 if abs(curr_brightness - processor.baseline_brightness) > processor.threshold:
-                    publish_topic = self.config_manager.get_publish_topic()
-                    self.mqtt_worker.publish(publish_topic, "")
-                    # app_logger.debug(f"摄像头 {idx+1} 亮度变化触发：{curr_brightness:.2f} (基准: {processor.baseline_brightness:.2f})")
+                    # 只在未上报过时才上报
+                    if not self.brightness_reported_flags[idx]:
+                        publish_topic = self.config_manager.get_publish_topic()
+                        self.mqtt_worker.publish(publish_topic, "")
+                        self.brightness_reported_flags[idx] = True
+                        app_logger.info(f"摄像头 {idx+1} 亮度变化触发上报：{curr_brightness:.2f} (基准: {processor.baseline_brightness:.2f})")
 
         # 4. Display Image (Convert BGR to RGB to QImage)
         rgb_frame = cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB)

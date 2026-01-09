@@ -8,14 +8,26 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
 from src.gui.main_window import MainWindow
-from src.gui.style import MATERIAL_STYLE
+from src.gui.style import TECHNO_STYLE
 
 def main():
+    # 设置 DPI 缩放环境变量（必须在创建 QApplication 之前设置）
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"
+    
     app = QApplication(sys.argv)
     
-    # Apply Material Design Style
-    app.setStyleSheet(MATERIAL_STYLE)
+    # 应用科技感样式
+    app.setStyleSheet(TECHNO_STYLE)
+    
+    # 设置字体，使用适中的点数
+    font = app.font()
+    font.setFamily("Segoe UI")
+    font.setPointSize(10)
+    app.setFont(font)
     
     window = MainWindow()
     window.show()

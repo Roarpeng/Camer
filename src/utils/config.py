@@ -12,27 +12,32 @@ class ConfigManager:
         self.config = {
             "mqtt": {
                 "broker": "localhost",
+                "client_id": "camer",
                 "subscribe_topics": ["changeState", "receiver"],
-                "publish_topic": "receiver"
+                "publish_topic": "receiver",
+                "auto_connect": True
             },
             "cameras": [
                 {
                     "active": False,
                     "mask": "",
                     "threshold": 50,
-                    "min_area": 500
+                    "min_area": 500,
+                    "scan_interval": 300
                 },
                 {
                     "active": False,
                     "mask": "",
                     "threshold": 50,
-                    "min_area": 500
+                    "min_area": 500,
+                    "scan_interval": 300
                 },
                 {
                     "active": False,
                     "mask": "",
                     "threshold": 50,
-                    "min_area": 500
+                    "min_area": 500,
+                    "scan_interval": 300
                 }
             ]
         }
@@ -80,6 +85,15 @@ class ConfigManager:
         self.config["mqtt"]["broker"] = broker
         self.save_config()
     
+    def get_client_id(self):
+        """获取 MQTT client ID"""
+        return self.config["mqtt"]["client_id"]
+    
+    def set_client_id(self, client_id):
+        """设置 MQTT client ID"""
+        self.config["mqtt"]["client_id"] = client_id
+        self.save_config()
+    
     def get_subscribe_topics(self):
         """获取订阅主题列表"""
         return self.config["mqtt"]["subscribe_topics"]
@@ -96,6 +110,15 @@ class ConfigManager:
     def set_publish_topic(self, topic):
         """设置发布主题"""
         self.config["mqtt"]["publish_topic"] = topic
+        self.save_config()
+    
+    def get_auto_connect(self):
+        """获取是否自动连接broker"""
+        return self.config["mqtt"].get("auto_connect", True)
+    
+    def set_auto_connect(self, auto_connect):
+        """设置是否自动连接broker"""
+        self.config["mqtt"]["auto_connect"] = auto_connect
         self.save_config()
     
     def get_camera_config(self, camera_id):
@@ -125,3 +148,7 @@ class ConfigManager:
     def set_camera_min_area(self, camera_id, min_area):
         """设置摄像头最小面积"""
         self.update_camera_config(camera_id, min_area=min_area)
+    
+    def set_camera_scan_interval(self, camera_id, scan_interval):
+        """设置摄像头扫描间隔（毫秒）"""
+        self.update_camera_config(camera_id, scan_interval=scan_interval)

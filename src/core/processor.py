@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import logging
+from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger("CamerApp")
 
@@ -45,16 +46,15 @@ class ImageProcessor:
     def process(self, frame):
         """
         Processes the frame:
-        1. Diff against baseline.
+        1. Diff against baseline (if baseline exists).
         2. Apply Mask.
         3. Check threshold.
         Returns: (processed_vis_frame, is_triggered, diff_count)
         """
+        # Only process if baseline has been established
         if self.baseline is None:
-            self.set_baseline(frame)
-            # If baseline is still None (e.g. empty frame), return original
-            if self.baseline is None:
-                return frame, False, 0
+            # Return original frame without processing if no baseline
+            return frame, False, 0
             
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(gray, (21, 21), 0)
@@ -88,7 +88,8 @@ class ImageProcessor:
                     continue
                 (x, y, w, h) = cv2.boundingRect(contour)
                 cv2.rectangle(vis_frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
-                cv2.putText(vis_frame, "报警提示", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                # Use PIL to draw Chinese text
+                vis_frame = self.put_chinese_text(vis_frame, "报警提示", (10, 20), font_size=20, color=(0, 0, 255))
         
         return vis_frame, is_triggered, diff_count
 
@@ -107,3 +108,49 @@ class ImageProcessor:
             mean_val = cv2.mean(gray)[0]
             
         return mean_val
+    
+    def put_chinese_text(self, frame, text, position, font_size=20, color=(0, 0, 255)):
+        """
+        Draw Chinese text on OpenCV image using PIL
+        
+        Args:
+            frame: OpenCV image (BGR format)
+            text: Text to draw (supports Chinese)
+            position: Tuple (x, y) for text position
+            font_size: Font size in pixels
+            color: Text color in BGR format (default: red)
+        """
+        try:
+            # Convert BGR to RGB for PIL
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(frame_rgb)
+            draw = ImageDraw.Draw(pil_image)
+            
+            # Try to load a Chinese font
+            font = None
+            try:
+                # Try Windows system Chinese fonts
+                font_paths = [
+                    "C:/Windows/Fonts/msyh.ttc",  # Microsoft YaHei
+                    "C:/Windows/Fonts/simhei.ttf",  # SimHei
+                    "C:/Windows/Fonts/simsun.ttc",  # SimSun
+                ]
+                for font_path in font_paths:
+                    if font_path:
+                        font = ImageFont.truetype(font_path, font_size)
+                        break
+            except:
+                # Fallback to default font
+                font = ImageFont.load_default()
+            
+            # Draw text
+            draw.text(position, text, font=font, fill=color)
+            
+            # Convert back to BGR
+            frame_bgr = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+            return frame_bgr
+        except Exception as e:
+            logger.error(f"Failed to draw Chinese text: {e}")
+            # Fallback to OpenCV putText with English
+            cv2.putText(frame, "ALERT", position, cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            return frame

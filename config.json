@@ -1,0 +1,35 @@
+{
+    "mqtt": {
+        "broker": "192.168.100.214",
+        "client_id": "camera",
+        "subscribe_topics": [
+            "changeState",
+            "receiver"
+        ],
+        "publish_topic": "receiver",
+        "auto_connect": true
+    },
+    "cameras": [
+        {
+            "active": false,
+            "mask": "",
+            "threshold": 50,
+            "min_area": 500,
+            "scan_interval": 300
+        },
+        {
+            "active": false,
+            "mask": "",
+            "threshold": 50,
+            "min_area": 500,
+            "scan_interval": 300
+        },
+        {
+            "active": false,
+            "mask": "",
+            "threshold": 50,
+            "min_area": 500,
+            "scan_interval": 300
+        }
+    ]
+}

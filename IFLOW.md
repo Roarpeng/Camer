@@ -171,7 +171,7 @@ pyinstaller CamerApp.spec
 ### 常见问题
 
 1. **摄像头无法打开**: 检查摄像头连接和索引，确保摄像头未被其他程序占用
-2. **MQTT 连接失败**: 检查 Broker 地址和网络连接
+2. **MQTT 连接失败**: 检查 Broker 地址 and 网络连接
 3. **掩码文件未显示**: 确保 `data/` 目录下存在 PNG 或 JPG 格式的掩码文件
 
 ## 资源路径处理
@@ -272,9 +272,183 @@ def get_resource_path(relative_path):
 - **主题灵活性**: 用户现在可以通过 UI 灵活配置订阅和发布主题，无需修改代码
 - **配置持久化**: 所有 MQTT 和主题配置都会自动保存和加载
 
+### 2026-01-08 - UI 乱码修复与智能触发优化
+
+#### 中文显示修复 (processor.py)
+- **Pillow 集成**: 添加 PIL (Pillow) 库支持中文文字渲染
+- **字体自动检测**: 自动尝试加载 Windows 系统中文字体
+  - 微软雅黑 (`msyh.ttc`)
+  - 黑体 (`simhei.ttf`)
+  - 宋体 (`simsun.ttc`)
+- **降级机制**: 字体加载失败时自动回退到英文 "ALERT"
+- **新增方法**: `put_chinese_text()` 方法支持中文文字绘制
+- **依赖要求**: 需要安装 `Pillow` 库
+
+#### 智能触发机制 (main_window.py)
+- **单次上报限制**: 基线建立后，亮度变化只触发一次 MQTT 上报
+  - 添加 `brightness_reported_flags` 跟踪上报状态
+  - 避免重复上报同一触发事件
+  - 基线重置时清除上报标志
+- **基线建立优化**: 移除自动基线建立逻辑
+  - 基线仅在收到 `changeState` 包含 `2` 时建立
+  - 基线未建立时不进行检测
+  - 基线建立后才开始帧差分析和亮度扫描
+
+#### 扫描间隔配置 (widgets.py, config.py, main_window.py)
+- **UI 增强**: 每个摄像头控制面板添加"扫描间隔"滑块
+  - 范围：100ms - 5000ms
+  - 默认：300ms
+- **配置管理**: 
+  - 添加 `scan_interval` 参数到配置文件
+  - 自动保存和加载扫描间隔设置
+- **动态调整**: 运行时实时调整扫描间隔，无需重启
+
+#### MQTT 连接修复 (main_window.py)
+- **参数传递修复**: 修复 `reconnect` 方法调用错误
+  - 使用关键字参数确保参数正确传递
+  - 修复 `list` 和 `int` 类型不匹配问题
+- **连接稳定性**: 改善 MQTT broker 连接的可靠性
+
+### 2026-01-08 - 自动配置与打包发布
+
+#### 自动配置功能 (config.py, widgets.py, main_window.py)
+- **自动连接 broker**: 
+  - 添加 `auto_connect` 配置选项
+  - 启动时根据配置自动连接 MQTT broker
+  - 默认启用自动连接
+- **自动激活摄像头**:
+  - 读取配置文件中的 `active` 状态
+  - 启动时自动激活标记为活动的摄像头
+  - 自动加载对应的 mask 文件
+- **配置完整性**: 启动时加载所有配置参数
+  - MQTT 配置（broker、主题、自动连接）
+  - 摄像头配置（激活、mask、阈值、最小面积、扫描间隔）
+  - 所有参数自动应用到 UI 和处理器
+
+#### 项目打包发布
+- **PyInstaller 配置** (CamerApp.spec):
+  - 添加 `config.json` 到打包列表
+  - 包含 `data` 目录及其所有掩码文件
+  - 单文件打包模式
+- **打包结果** (dist/ 目录):
+  - `CamerApp.exe` - 可执行文件
+  - `config.json` - 配置文件
+  - `data/` - 掩码文件目录
+- **部署说明**:
+  - 整个 dist 目录可直接部署
+  - 配置文件位于 exe 同级目录
+  - 用户可直接编辑配置文件
+  - 支持添加自定义掩码文件
+
+#### 配置文件完整格式
+```json
+{
+  "mqtt": {
+    "broker": "localhost",
+    "subscribe_topics": ["changeState", "receiver"],
+    "publish_topic": "receiver",
+    "auto_connect": true
+  },
+  "cameras": [
+    {
+      "active": false,
+      "mask": "",
+      "threshold": 50,
+      "min_area": 500,
+      "scan_interval": 300
+    }
+  ]
+}
+```
+
+#### 功能特性总结
+- **独立基线管理**: 每个摄像头 independent 建立基线，但共用触发信号
+- **智能触发**: 基线建立后只触发一次上报，避免重复
+- **灵活配置**: 所有参数可通过 UI 或配置文件配置
+- **自动启动**: 支持自动连接 broker 和激活摄像头
+- **易于部署**: 打包为单文件 exe，配置文件同级管理
+
+### 2026-01-08 - MQTT Client ID 配置功能
+
+#### Client ID 配置支持 (config.py)
+- **配置项新增**: 添加 `client_id` 配置字段
+  - 默认值：`"camer"`
+  - 用于标识 MQTT 客户端身份
+- **配置管理**: 
+  - 新增 `get_client_id()` 方法获取配置
+  - 新增 `set_client_id()` 方法保存配置
+  - 配置变更自动保存到 `config.json`
+
+#### UI 配置界面 (widgets.py)
+- **Client ID 输入框**: 在 MqttConfigWidget 中添加
+  - 位置：Broker 地址下方
+  - 默认值：`camer`
+  - 支持自定义 Client ID
+- **信号更新**: 
+  - `config_updated` 信号增加 `client_id` 参数
+  - 连接时自动发送配置的 Client ID
+- **配置同步**: UI 配置变更时自动保存
+
+#### 主窗口集成 (main_window.py)
+- **初始化集成**: 
+  - 启动时从配置加载 Client ID
+  - 使用配置的 Client ID 初始化 MqttWorker
+- **配置加载**: `load_config()` 方法加载 Client ID
+- **配置更新**: `on_mqtt_config_updated()` 方法处理 Client ID 更新
+- **自动连接**: 自动连接时使用配置的 Client ID
+
+#### MQTT 客户端增强 (mqtt_client.py)
+- **Client ID 支持**: 
+  - `__init__()` 方法添加 `client_id` 参数
+  - 使用配置的 Client ID 创建 MQTT 客户端
+  - 存储为 `self.client_id_str` 供后续使用
+- **动态更新**: 
+  - `reconnect()` 方法支持动态更新 Client ID
+  - Client ID 变更时重新创建客户端对象
+  - 保持回调函数配置不变
+
+#### 配置文件更新
+```json
+{
+  "mqtt": {
+    "broker": "localhost",
+    "client_id": "camer",
+    "subscribe_topics": ["changeState", "receiver"],
+    "publish_topic": "receiver",
+    "auto_connect": true
+  }
+}
+```
+
+#### 功能说明
+- **身份标识**: Client ID 用于在 MQTT broker 中唯一标识客户端
+- **多实例支持**: 不同实例可使用不同的 Client ID
+- **连接管理**: Client ID 变更时自动重新连接
+- **配置持久化**: Client ID 配置自动保存和加载
+
 ## 版本信息
 
 - **项目名称**: Camer
 - **Python 版本**: 3.11
-- **最后更新**: 2026-01-08
+- **最后更新**: 2026-01-09
 - **Git 仓库**: git@github.com:Roarpeng/Camer.git
+
+### 2026-01-09 - UI 布局深度优化与架构重构
+
+#### 架构级更新 (main_window.py)
+- **引入左侧滚动条 (QScrollArea)**: 为左侧控制面板添加了滚动支持，彻底解决了因组件垂直增长导致的布局挤压和控件重叠问题。
+- **布局间距标准化**: 统一了面板宽度 (340px) 和内边距，提升了界面的整体呼吸感。
+
+#### 组件垂直化重构 (widgets.py)
+- **LabeledSlider 垂直化**: 滑块组件改为“标签在左上、数值在右上、滑块占满全宽”的垂直堆叠模式。提供了更宽的调节区域，解决了数值被遮挡的问题。
+- **MQTT/摄像头配置垂直化**: 所有的输入字段统一采用“标签在上，输入框在下”的排版方式。这在窄面板环境下提供了最佳的稳定性。
+- **固定高度与弹性布局**: 移除了导致布局混乱的硬性高度限制，改用 `min-height` 配合内容自适应。
+
+#### 视觉主题精调 (style.py)
+- **Ant Design 风格强化**: 采用 `#1890FF`（主色蓝）和 `#F0F2F5`（浅灰背景）的专业配色方案。
+- **卡片式设计优化**: 配置项采用白色卡片背景、圆角及微阴影处理，视觉层次更加清晰。
+- **交互回馈**: 优化了按钮悬停、滑块拖动及下拉框的样式细节。
+
+#### 体验改进
+- **无重叠操作**: 即使在小分辨率屏幕下，通过滚动条也能确保所有控制项完整可触达。
+- **中文字体渲染**: 优化了中文字体的显示效果，确保在高 DPI 下依然清晰。
