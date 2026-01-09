@@ -12,9 +12,9 @@
     "cameras": [
         {
             "active": true,
-            "mask": "C:\\Users\\vboxuser\\Desktop\\Project\\Camer\\data\\1.png",
+            "mask": "C:\\Users\\vboxuser\\Desktop\\Project\\Camer\\data\\WIN_20260105_21_02_18_Pro.jpg",
             "threshold": 10,
-            "min_area": 757,
+            "min_area": 745,
             "scan_interval": 306
         },
         {
