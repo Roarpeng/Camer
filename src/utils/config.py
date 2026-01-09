@@ -15,7 +15,8 @@ class ConfigManager:
                 "client_id": "camer",
                 "subscribe_topics": ["changeState", "receiver"],
                 "publish_topic": "receiver",
-                "auto_connect": True
+                "auto_connect": True,
+                "baseline_delay": 1000
             },
             "cameras": [
                 {
@@ -152,3 +153,12 @@ class ConfigManager:
     def set_camera_scan_interval(self, camera_id, scan_interval):
         """设置摄像头扫描间隔（毫秒）"""
         self.update_camera_config(camera_id, scan_interval=scan_interval)
+    
+    def get_baseline_delay(self):
+        """获取基线建立延时（毫秒）"""
+        return self.config["mqtt"].get("baseline_delay", 1000)
+    
+    def set_baseline_delay(self, delay):
+        """设置基线建立延时（毫秒）"""
+        self.config["mqtt"]["baseline_delay"] = delay
+        self.save_config()

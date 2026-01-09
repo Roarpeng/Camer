@@ -7,12 +7,13 @@
             "receiver"
         ],
         "publish_topic": "receiver",
-        "auto_connect": true
+        "auto_connect": true,
+        "baseline_delay": 603
     },
     "cameras": [
         {
-            "active": false,
-            "mask": "",
+            "active": true,
+            "mask": "C:\\Users\\vboxuser\\AppData\\Local\\Temp\\_MEI120842\\data\\1.png",
             "threshold": 50,
             "min_area": 500,
             "scan_interval": 300

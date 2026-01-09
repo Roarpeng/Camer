@@ -31,6 +31,11 @@ class MainWindow(QMainWindow):
         self.brightness_reported_flags = [False] * 3
         self.scan_intervals = [300] * 3  # 默认300ms
         
+        # 基线延时相关
+        self.baseline_delay = 1000  # 默认延时1秒
+        self.baseline_trigger_time = 0.0  # 触发时间戳
+        self.baseline_pending = False  # 是否有待处理的基线建立
+        
         # Config Manager
         self.config_manager = ConfigManager()
         
@@ -142,6 +147,7 @@ class MainWindow(QMainWindow):
         # MQTT Signal
         self.mqtt_config.config_updated.connect(self.on_mqtt_config_updated)
         self.mqtt_config.auto_connect_changed.connect(self.on_auto_connect_changed)
+        self.mqtt_config.baseline_delay_changed.connect(self.on_baseline_delay_changed)
         self.mqtt_worker.reset_signal.connect(self.on_mqtt_trigger)
         self.mqtt_worker.status_changed.connect(self.mqtt_config.update_status)
 
@@ -173,6 +179,12 @@ class MainWindow(QMainWindow):
         if auto_connect:
             app_logger.info("配置为自动连接，正在连接 MQTT Broker...")
             self.mqtt_worker.reconnect(broker=broker, client_id=client_id, subscribe_topics=subscribe_topics, publish_topic=publish_topic)
+        
+        # 加载基线延时配置
+        self.baseline_delay = self.config_manager.get_baseline_delay()
+        self.mqtt_config.slider_baseline_delay.blockSignals(True)
+        self.mqtt_config.slider_baseline_delay.setValue(self.baseline_delay)
+        self.mqtt_config.slider_baseline_delay.blockSignals(False)
         
         # 加载摄像头配置
         for i in range(3):
@@ -237,10 +249,17 @@ class MainWindow(QMainWindow):
         app_logger.info(f"自动连接设置已更新: {auto_connect}")
 
     def on_mqtt_trigger(self):
-        """Triggered by MQTT to reset all baselines"""
-        app_logger.info("收到 MQTT 触发信号：重置所有摄像头基准。")
-        for i in range(3):
-            self.on_reset_baseline(i)
+        """Triggered by MQTT to reset all baselines (with delay)"""
+        self.baseline_trigger_time = time.time()
+        self.baseline_pending = True
+        app_logger.info(f"收到 MQTT 触发信号：{self.baseline_delay}ms 后重置所有摄像头基准。")
+    
+    @Slot(int)
+    def on_baseline_delay_changed(self, val):
+        """Handle baseline delay change from UI"""
+        self.baseline_delay = val
+        self.config_manager.set_baseline_delay(val)
+        app_logger.info(f"基线延时已更新为: {val}ms")
 
     def handle_camera_error(self, err, idx):
         app_logger.error(f"摄像头 {idx+1}: {err}")
@@ -302,6 +321,16 @@ class MainWindow(QMainWindow):
         processor = self.processors[idx]
         display = self.displays[idx]
         
+        # 0. 检查延时基线建立（使用 currenttime - lasttime 逻辑）
+        current_time = time.time()
+        if self.baseline_pending:
+            delay_sec = self.baseline_delay / 1000.0  # 转换为秒
+            if (current_time - self.baseline_trigger_time) >= delay_sec:
+                self.baseline_pending = False
+                app_logger.info("延时完成，正在重置所有摄像头基准...")
+                for i in range(3):
+                    self.on_reset_baseline(i)
+        
         # 1. Update Baseline if requested
         if self.need_baseline_flags[idx]:
             processor.set_baseline(frame)
@@ -311,7 +340,6 @@ class MainWindow(QMainWindow):
         vis_frame, is_triggered, diff_val = processor.process(frame)
         
         # 3. ROI Brightness Scan (使用配置的扫描间隔)
-        current_time = time.time()
         scan_interval_sec = self.scan_intervals[idx] / 1000.0  # 转换为秒
         if (current_time - self.last_scan_times[idx]) >= scan_interval_sec:
             self.last_scan_times[idx] = current_time

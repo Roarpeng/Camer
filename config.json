@@ -7,15 +7,16 @@
             "receiver"
         ],
         "publish_topic": "receiver",
-        "auto_connect": true
+        "auto_connect": true,
+        "baseline_delay": 10000
     },
     "cameras": [
         {
-            "active": false,
-            "mask": "",
-            "threshold": 50,
-            "min_area": 500,
-            "scan_interval": 300
+            "active": true,
+            "mask": "C:\\Users\\vboxuser\\Desktop\\Project\\Camer\\data\\1.png",
+            "threshold": 26,
+            "min_area": 567,
+            "scan_interval": 282
         },
         {
             "active": false,

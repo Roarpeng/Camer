@@ -178,6 +178,7 @@ class CameraControlWidget(QGroupBox):
 class MqttConfigWidget(QGroupBox):
     config_updated = Signal(str, str, list, str)
     auto_connect_changed = Signal(bool)
+    baseline_delay_changed = Signal(int)
 
     def __init__(self):
         super().__init__("MQTT 服务配置")
@@ -207,6 +208,11 @@ class MqttConfigWidget(QGroupBox):
         self.check_auto_connect = QCheckBox("启动时自动尝试连接")
         self.check_auto_connect.setChecked(True)
         layout.addWidget(self.check_auto_connect)
+        
+        # 基线延时滑块
+        self.slider_baseline_delay = LabeledSlider("基线建立延时", 100, 10000, 1000, "ms")
+        layout.addWidget(self.slider_baseline_delay)
+        self.slider_baseline_delay.valueChanged.connect(self.baseline_delay_changed.emit)
         
         self.btn_update = QPushButton("更新并连接 MQTT")
         self.btn_update.setFixedHeight(36)

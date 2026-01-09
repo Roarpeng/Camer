@@ -452,3 +452,40 @@ def get_resource_path(relative_path):
 #### 体验改进
 - **无重叠操作**: 即使在小分辨率屏幕下，通过滚动条也能确保所有控制项完整可触达。
 - **中文字体渲染**: 优化了中文字体的显示效果，确保在高 DPI 下依然清晰。
+
+### 2026-01-09 - 基线建立延时功能
+
+#### 功能需求
+收到 `changeState` 报文（含有 `2`）后，延时一段可配置的时间，再检测 ROI 区域亮度并设立基线。
+
+#### 配置管理 (config.py)
+- **新增配置项**: `baseline_delay`（毫秒），默认值 `1000`
+- **配置方法**: `get_baseline_delay()` / `set_baseline_delay()`
+- **配置持久化**: 自动保存到 `config.json`
+
+#### UI 界面 (widgets.py)
+- **新增滑块**: "基线建立延时" 滑块
+  - 范围：100ms - 10000ms
+  - 默认：1000ms（1秒）
+- **实时调整**: 滑块值变更时立即生效
+
+#### 延时逻辑 (main_window.py)
+- **非阻塞实现**: 使用 `currenttime - lasttime` 时间戳逻辑
+- **触发流程**:
+  1. 收到 MQTT 信号 → 记录 `baseline_trigger_time` 时间戳
+  2. 在 `process_frame()` 中检查 `current_time - baseline_trigger_time >= delay`
+  3. 条件满足时执行基线重置
+
+#### 配置文件格式
+```json
+{
+  "mqtt": {
+    "broker": "localhost",
+    "client_id": "camer",
+    "subscribe_topics": ["changeState", "receiver"],
+    "publish_topic": "receiver",
+    "auto_connect": true,
+    "baseline_delay": 1000
+  }
+}
+```
