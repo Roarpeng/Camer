@@ -991,3 +991,147 @@ def get_resource_path(relative_path):
 - **向后兼容**: 无 mask 时显示原始图像，保持原有行为
 - **动态切换**: 运行时选择/取消 mask，显示自动切换
 - **尺寸自适应**: Mask 自动 resize 到原始帧尺寸，无需手动调整
+
+### 2026-01-10 - ROI 独立检测与智能可视化
+
+#### 重构目标
+实现独立的 ROI 区域检测与红框提示，提升检测精度和用户体验，解决 UI 卡顿问题。
+
+#### 核心功能
+
+**1. ROI 独立区域解析 (processor.py)**
+- **连通区域识别**: 使用 `cv2.findContours` 解析 mask 中的独立连通区域
+- **ROI 对象存储**: 每个区域存储为独立的 ROI 对象
+  - `contour`: 轮廓数据
+  - `bounding_rect`: 边界框 (x, y, w, h)
+  - `sub_mask`: 子掩码（仅包含该 ROI）
+- **动态重解析**: mask 尺寸调整后自动重新解析 ROI
+
+**2. ROI 独立检测逻辑**
+- **独立判断**: 每个 ROI 独立计算差异像素数量
+- **精确计算**: 使用 `cv2.countNonZero` 配合 `sub_mask` 只计算 ROI 区域
+- **阈值触发**: 单个 ROI 触发阈值即报警
+- **静态轮廓绘制**: 触发时绘制 ROI 的静态外轮廓（红色线条），而非运动物体边框
+
+**3. 遮罩可视化增强**
+- **无基线显示**: 即使没有基线，也能看到遮罩效果
+- **非 ROI 变暗**: 使用 70% 原图 + 30% 遮罩混合，非 ROI 区域变暗
+- **视觉反馈**: 清晰展示 ROI 和非 ROI 区域
+
+#### 实现细节
+
+**set_mask() 方法增强**
+```python
+def set_mask(self, mask_path):
+    # 加载 mask 并转换为二值
+    _, self.mask = cv2.threshold(mask_img, 127, 255, cv2.THRESH_BINARY)
+    
+    # 解析独立的连通区域
+    contours, _ = cv2.findContours(self.mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # 存储每个 ROI 的信息
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        sub_mask = np.zeros_like(self.mask)
+        cv2.drawContours(sub_mask, [contour], -1, 255, -1)
+        self.rois.append({
+            'contour': contour,
+            'bounding_rect': (x, y, w, h),
+            'sub_mask': sub_mask
+        })
+```
+
+**process() 方法重构**
+```python
+def process(self, frame):
+    # 步骤1：可视化 - 叠加遮罩效果
+    vis_frame = small_frame.copy()
+    if self.mask is not None:
+        mask_overlay = np.zeros_like(small_frame)
+        mask_overlay[self.mask == 0] = [0, 0, 0]
+        vis_frame = cv2.addWeighted(vis_frame, 0.7, mask_overlay, 0.3, 0)
+    
+    # 步骤2：检测 - 计算差分
+    frame_delta = cv2.absdiff(self.baseline, blur)
+    _, thresh = cv2.threshold(frame_delta, self.threshold, 255, cv2.THRESH_BINARY)
+    
+    # 步骤3：ROI 独立判断
+    for roi in self.rois:
+        roi_diff = cv2.bitwise_and(thresh, thresh, mask=roi['sub_mask'])
+        diff_count = cv2.countNonZero(roi_diff)
+        
+        if diff_count > self.min_area:
+            is_triggered = True
+            # 绘制 ROI 静态外轮廓
+            cv2.drawContours(vis_frame, [roi['contour']], -1, (0, 0, 255), 2)
+```
+
+#### 技术优势
+
+| 特性 | 实现方式 | 优势 |
+|------|----------|------|
+| **独立检测** | 每个 ROI 独立计算 | 精确检测，避免全局误报 |
+| **静态轮廓** | 绘制 ROI 外轮廓 | 清晰展示触发区域 |
+| **遮罩可视化** | 非 ROI 区域变暗 | 直观展示 ROI 范围 |
+| **无基线显示** | 始终显示遮罩效果 | 方便调试和观察 |
+| **子线程处理** | 图像处理在子线程 | 主线程流畅，无卡顿 |
+
+#### 检测流程
+
+```
+1. 加载 mask → 解析 ROI 区域
+2. 采集图像 → 降采样到 645x360
+3. 叠加遮罩 → 非 ROI 区域变暗
+4. 计算差分 → 高斯模糊 + 阈值处理
+5. ROI 独立判断 → 遍历每个 ROI
+6. 触发检测 → 绘制红色轮廓 + 报警标签
+7. 返回显示 → 包含可视化效果的图像
+```
+
+#### 显示效果
+
+| 状态 | 显示内容 | 说明 |
+|------|----------|------|
+| **无 mask** | 完整图像 | 显示原始摄像头图像 |
+| **有 mask，无基线** | 遮罩可视化 | ROI 区域正常，非 ROI 区域变暗 |
+| **有 mask，有基线，未触发** | 遮罩可视化 | ROI 区域正常，非 ROI 区域变暗 |
+| **有 mask，有基线，触发** | 遮罩 + 红框 | ROI 区域 + 红色轮廓 + 报警标签 |
+
+#### 性能优化
+
+- **降采样计算**: 1376x768 → 645x360，计算量减少 75%
+- **ROI 独立判断**: 只计算 ROI 区域，避免全局扫描
+- **子线程处理**: 图像处理完全在子线程完成
+- **静态轮廓绘制**: 使用预计算的 contour，避免实时计算
+
+#### 修改文件清单
+- `src/gui/widgets.py` - ImageDisplay 报警标签（已完成）
+- `src/core/processor.py` - ROI 独立检测实现
+- `src/core/camera.py` - 子线程处理（已完成）
+- `src/gui/main_window.py` - UI 逻辑优化
+
+#### 关键参数
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| 处理分辨率 | 645x360 | 图像处理分辨率 |
+| 显示分辨率 | 1376x768 | UI 显示分辨率 |
+| 高斯模糊核 | 11x11 | 降噪处理 |
+| ROI 解析方法 | cv2.RETR_EXTERNAL | 只检测外轮廓 |
+| 遮罩混合比例 | 70% 原图 + 30% 遮罩 | 视觉效果 |
+
+#### 兼容性说明
+
+- **向后兼容**: 无 mask 时显示原始图像
+- **动态切换**: 运行时选择/取消 mask，显示自动切换
+- **尺寸自适应**: Mask 自动 resize 到 645x360
+- **ROI 重解析**: Mask 尺寸调整后自动重新解析 ROI
+
+#### 测试建议
+
+- 测试单个 ROI 触发时的红框显示
+- 测试多个 ROI 同时触发的情况
+- 验证非 ROI 区域变暗效果
+- 测试无基线时的遮罩可视化
+- 确认子线程处理不影响主线程性能
+- 验证 MQTT 上报功能正常

@@ -354,9 +354,8 @@ class MainWindow(QMainWindow):
                         self.brightness_reported_flags[idx] = True
                         app_logger.info(f"摄像头 {idx+1} 亮度变化触发上报：{current_brightness:.2f} (基准: {processor.baseline_brightness:.2f})")
 
-        # 4. Display Image - Resize 到 645x360 与 mask 尺寸一致，方便观察 mask 遮盖效果
-        display_frame = cv2.resize(frame, (645, 360))
-        rgb_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+        # 4. Display Image - frame 已经是处理后的图像（包含可视化效果）
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
         bytes_per_line = ch * w
         q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)

@@ -11,11 +11,13 @@ class ImageProcessor:
         self.threshold = 50   # Difference threshold per pixel
         self.min_area = 500   # Minimum number of pixels to trigger (noise filter)
         self.baseline_brightness = None
+        self.rois = []  # 独立的 ROI 区域列表 (每个包含 contour, bounding_rect, sub_mask)
 
     def set_mask(self, mask_path):
-        """Loads a mask image and converts to binary."""
+        """Loads a mask image and converts to binary, then extracts independent ROI regions."""
         if not mask_path:
             self.mask = None
+            self.rois = []
             return
 
         try:
@@ -27,7 +29,27 @@ class ImageProcessor:
 
             # Threshold to binary (ensure 0 or 255)
             _, self.mask = cv2.threshold(mask_img, 127, 255, cv2.THRESH_BINARY)
-            logger.info(f"遮罩设置成功: {mask_path}")
+
+            # 解析独立的连通区域
+            self.rois = []
+            contours, _ = cv2.findContours(self.mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            for contour in contours:
+                # 获取边界框
+                x, y, w, h = cv2.boundingRect(contour)
+                # 创建该 ROI 的子 mask
+                sub_mask = np.zeros_like(self.mask)
+                cv2.drawContours(sub_mask, [contour], -1, 255, -1)
+
+                # 存储 ROI 信息
+                roi = {
+                    'contour': contour,
+                    'bounding_rect': (x, y, w, h),
+                    'sub_mask': sub_mask
+                }
+                self.rois.append(roi)
+
+            logger.info(f"遮罩设置成功: {mask_path}, 解析出 {len(self.rois)} 个独立 ROI 区域")
         except Exception as e:
             logger.error(f"Error setting mask: {e}")
 
@@ -43,6 +65,8 @@ class ImageProcessor:
         if self.mask is not None:
             if self.mask.shape != small_frame.shape[:2]:
                 self.mask = cv2.resize(self.mask, (645, 360), interpolation=cv2.INTER_NEAREST)
+                # 重新解析 ROI 区域
+                self._reparse_rois()
 
         # Convert to gray and blur slightly to reduce noise
         # 使用 11x11 核代替 21x21，性能提升约 70%，降噪效果基本相同
@@ -51,64 +75,99 @@ class ImageProcessor:
         self.baseline_brightness = self.get_current_brightness(small_frame)
         logger.info(f"基准已建立。基准亮度: {self.baseline_brightness:.2f}")
 
+    def _reparse_rois(self):
+        """重新解析 ROI 区域（在 mask 尺寸调整后调用）"""
+        if self.mask is None:
+            self.rois = []
+            return
+
+        self.rois = []
+        contours, _ = cv2.findContours(self.mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            sub_mask = np.zeros_like(self.mask)
+            cv2.drawContours(sub_mask, [contour], -1, 255, -1)
+
+            roi = {
+                'contour': contour,
+                'bounding_rect': (x, y, w, h),
+                'sub_mask': sub_mask
+            }
+            self.rois.append(roi)
+
     def process(self, frame):
         """
-        Processes the frame with downsampling for performance:
+        Processes the frame with independent ROI detection:
         1. Downsample frame to 645x360 for processing
-        2. Check and resize mask to match small frame
-        3. Diff against baseline (if baseline exists)
-        4. Apply mask and threshold
-        Returns: (display_frame, is_triggered, diff_count, current_brightness)
+        2. Apply mask visualization (dim non-ROI areas)
+        3. Calculate diff and detect changes in each ROI independently
+        4. Draw static ROI contours on triggered regions
+        Returns: (vis_frame, is_triggered, total_diff_count, current_brightness)
         """
-        # Only process if baseline has been established
-        if self.baseline is None:
-            # Return original frame without processing if no baseline
-            # 同时计算亮度用于后续扫描
-            small_frame = cv2.resize(frame, (645, 360))
-            current_brightness = self.get_current_brightness(small_frame)
-            return frame, False, 0, current_brightness
-
-        # 第一步：降采样到 645x360
+        # 降采样到 645x360
         small_frame = cv2.resize(frame, (645, 360))
 
-        # 第二步：Mask 安全检查 - 每帧检查 shape 确保绝对稳定
+        # 步骤1：可视化 - 叠加遮罩效果（将非 ROI 区域变暗）
+        vis_frame = small_frame.copy()
         if self.mask is not None:
+            # 确保 mask 尺寸匹配
             if self.mask.shape != small_frame.shape[:2]:
                 self.mask = cv2.resize(self.mask, (645, 360), interpolation=cv2.INTER_NEAREST)
+                self._reparse_rois()
 
-        # 第三步：使用 small_frame 进行计算
+            # 创建半透明遮罩层（非 ROI 区域变暗）
+            mask_overlay = np.zeros_like(small_frame)
+            mask_overlay[self.mask == 0] = [0, 0, 0]  # 非 ROI 区域变黑
+            vis_frame = cv2.addWeighted(vis_frame, 0.7, mask_overlay, 0.3, 0)
+
+        # 如果没有基线，只返回可视化图像
+        if self.baseline is None:
+            current_brightness = self.get_current_brightness(small_frame)
+            # 将 vis_frame resize 回原始尺寸用于显示
+            h, w = frame.shape[:2]
+            display_frame = cv2.resize(vis_frame, (w, h), interpolation=cv2.INTER_LINEAR)
+            return display_frame, False, 0, current_brightness
+
+        # 步骤2：检测 - 计算高斯模糊和差分
         gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
-        # 使用 11x11 核代替 21x11，性能提升约 70%
         blur = cv2.GaussianBlur(gray, (11, 11), 0)
-
-        # 1. Absolute Difference
         frame_delta = cv2.absdiff(self.baseline, blur)
-
-        # 2. Thresholding
         _, thresh = cv2.threshold(frame_delta, self.threshold, 255, cv2.THRESH_BINARY)
 
-        # 3. Apply Mask (if exists)
-        if self.mask is not None:
-            thresh = cv2.bitwise_and(thresh, thresh, mask=self.mask)
+        # 步骤3：ROI 独立判断
+        is_triggered = False
+        total_diff_count = 0
 
-        # 4. Count non-zero pixels
-        diff_count = cv2.countNonZero(thresh)
-        is_triggered = diff_count > self.min_area
+        if self.rois:
+            # 遍历每个 ROI 区域
+            for roi in self.rois:
+                sub_mask = roi['sub_mask']
+                contour = roi['contour']
 
-        # 5. 计算当前亮度（使用 small_frame）
+                # 仅计算该 ROI 区域内的差异像素数量
+                roi_diff = cv2.bitwise_and(thresh, thresh, mask=sub_mask)
+                diff_count = cv2.countNonZero(roi_diff)
+                total_diff_count += diff_count
+
+                # 如果该 ROI 触发阈值
+                if diff_count > self.min_area:
+                    is_triggered = True
+                    # 在 vis_frame 上绘制该 ROI 的静态外轮廓（红色线条）
+                    cv2.drawContours(vis_frame, [contour], -1, (0, 0, 255), 2)
+        else:
+            # 没有 ROI 时的全局检测
+            total_diff_count = cv2.countNonZero(thresh)
+            is_triggered = total_diff_count > self.min_area
+
+        # 计算当前亮度
         current_brightness = self.get_current_brightness(small_frame)
 
-        # 6. 准备显示图像
-        display_frame = frame.copy()
-        if self.mask is not None:
-            # 将 mask resize 到原始帧尺寸
-            h, w = frame.shape[:2]
-            display_mask = cv2.resize(self.mask, (w, h), interpolation=cv2.INTER_NEAREST)
-            # 应用 mask 到显示图像，非ROI区域变黑
-            display_frame = cv2.bitwise_and(display_frame, display_frame, mask=display_mask)
+        # 将 vis_frame resize 回原始尺寸用于显示
+        h, w = frame.shape[:2]
+        display_frame = cv2.resize(vis_frame, (w, h), interpolation=cv2.INTER_LINEAR)
 
-        # 返回显示图像（有mask时显示叠加mask后的图像，无mask时显示原始图像）
-        return display_frame, is_triggered, diff_count, current_brightness
+        return display_frame, is_triggered, total_diff_count, current_brightness
 
     def get_current_brightness(self, frame):
         """Calculates mean brightness within the masked region."""
