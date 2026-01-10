@@ -23,7 +23,6 @@ class MainWindow(QMainWindow):
         
         # Multi-Camera Systems
         self.cameras = []
-        self.processors = []
         self.displays = []
         self.controls = []
         self.need_baseline_flags = [False] * 8
@@ -122,18 +121,15 @@ class MainWindow(QMainWindow):
         self.log_handler.log_signal.connect(self.log_viewer.append_log)
 
         for i in range(8):
-            # Processor
-            proc = ImageProcessor()
-            self.processors.append(proc)
-
-            # Camera Thread
+            # Camera Thread (内部包含 processor)
             cam = CameraThread(camera_index=i)
             self.cameras.append(cam)
 
             # Connections
             # Use lambda with default argument to capture 'i' correctly in the loop
-            cam.processed_data_ready.connect(lambda frame, triggered, brightness, idx=i: self.update_camera_ui(frame, triggered, brightness, idx))
+            cam.processed_data_ready.connect(lambda frame, triggered, brightness, indices, idx=i: self.update_camera_ui(frame, triggered, brightness, indices, idx))
             cam.error_occurred.connect(lambda err, idx=i: self.handle_camera_error(err, idx))
+            cam.rois_updated.connect(lambda contours, idx=i: self.displays[idx].set_rois(contours))
 
             # Control Connections
             ctrl = self.controls[i]
@@ -220,13 +216,13 @@ class MainWindow(QMainWindow):
                 ctrl.slider_interval.blockSignals(False)
                 
                 # 应用到处理器
-                self.processors[i].threshold = cam_config.get("threshold", 50)
-                self.processors[i].min_area = cam_config.get("min_area", 500)
+                self.cameras[i].processor.threshold = cam_config.get("threshold", 50)
+                self.cameras[i].processor.min_area = cam_config.get("min_area", 500)
                 self.scan_intervals[i] = cam_config.get("scan_interval", 300)
-                
+
                 # 如果掩码路径存在，应用到处理器
                 if mask and os.path.exists(mask):
-                    self.processors[i].set_mask(mask)
+                    self.cameras[i].set_mask(mask)
                 
                 # 如果配置为激活，则自动激活摄像头
                 if cam_config.get("active", False):
@@ -274,33 +270,54 @@ class MainWindow(QMainWindow):
         cam = self.cameras[idx]
         if active:
             if not cam.isRunning():
-                cam.start()
-                app_logger.info(f"正在请求激活摄像头 {idx+1}...")
+                # 如果线程已完成，需要重新创建实例
+                if cam.isFinished():
+                    # 重新创建 CameraThread 实例
+                    new_cam = CameraThread(camera_index=idx)
+                    # 复制原 processor 的配置
+                    new_cam.processor.mask = cam.processor.mask
+                    new_cam.processor.rois = cam.processor.rois
+                    new_cam.processor.threshold = cam.processor.threshold
+                    new_cam.processor.min_area = cam.processor.min_area
+                    # 重新连接信号
+                    new_cam.processed_data_ready.connect(lambda frame, triggered, brightness, indices, idx=idx: self.update_camera_ui(frame, triggered, brightness, indices, idx))
+                    new_cam.error_occurred.connect(lambda err, idx=idx: self.handle_camera_error(err, idx))
+                    new_cam.rois_updated.connect(lambda contours, idx=idx: self.displays[idx].set_rois(contours))
+                    # 替换旧的线程实例
+                    self.cameras[idx] = new_cam
+                    new_cam.start()
+                    app_logger.info(f"正在重新激活摄像头 {idx+1}...")
+                else:
+                    cam.start()
+                    app_logger.info(f"正在请求激活摄像头 {idx+1}...")
         else:
             if cam.isRunning():
                 cam.stop()
                 self.displays[idx].setText(f"摄像头 {idx+1} 已断开连接")
                 app_logger.info(f"摄像头 {idx+1} 已停用。")
-        
+
         # 保存配置
         self.config_manager.set_camera_active(idx, active)
 
 
     @Slot(str, int)
     def on_mask_changed(self, path, idx):
-        self.processors[idx].set_mask(path)
+        # 更新 camera 的 processor
+        self.cameras[idx].set_mask(path)
         self.config_manager.set_camera_mask(idx, path)
         app_logger.info(f"摄像头 {idx+1} 遮罩已更新。")
 
     @Slot(int, int)
     def on_threshold_changed(self, val, idx):
-        self.processors[idx].threshold = val
+        # 更新 camera 的 processor
+        self.cameras[idx].set_threshold(val)
         self.config_manager.set_camera_threshold(idx, val)
         app_logger.debug(f"摄像头 {idx+1} 阈值已更新为: {val}")
 
     @Slot(int, int)
     def on_min_area_changed(self, val, idx):
-        self.processors[idx].min_area = val
+        # 更新 camera 的 processor
+        self.cameras[idx].set_min_area(val)
         self.config_manager.set_camera_min_area(idx, val)
         app_logger.debug(f"摄像头 {idx+1} 最小面积已更新为: {val}")
 
@@ -316,10 +333,10 @@ class MainWindow(QMainWindow):
         self.brightness_reported_flags[idx] = False
         app_logger.info(f"摄像头 {idx+1} 基准重置请求已发送。")
 
-    @Slot(object, bool, float, int)
-    def update_camera_ui(self, frame, is_triggered, current_brightness, idx):
+    @Slot(object, bool, float, list, int)
+    def update_camera_ui(self, frame, is_triggered, current_brightness, triggered_indices, idx):
         """更新摄像头 UI，处理后的数据已在子线程中完成"""
-        processor = self.processors[idx]
+        processor = self.cameras[idx].processor
         display = self.displays[idx]
 
         # 0. 检查延时基线建立（使用 currenttime - lasttime 逻辑）
@@ -361,6 +378,9 @@ class MainWindow(QMainWindow):
         q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
 
         display.update_image(q_img)
+        
+        # 5. 更新 ROI 红色圆环状态
+        display.update_triggered_rois(triggered_indices)
 
     def closeEvent(self, event):
         self.mqtt_worker.stop()

@@ -11,6 +11,7 @@ class ImageProcessor:
         self.threshold = 50   # Difference threshold per pixel
         self.min_area = 500   # Minimum number of pixels to trigger (noise filter)
         self.baseline_brightness = None
+        self.roi_baseline_brightness = []  # 每个 ROI 的基线亮度
         self.rois = []  # 独立的 ROI 区域列表 (每个包含 contour, bounding_rect, sub_mask)
 
     def set_mask(self, mask_path):
@@ -73,7 +74,14 @@ class ImageProcessor:
         gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
         self.baseline = cv2.GaussianBlur(gray, (11, 11), 0)
         self.baseline_brightness = self.get_current_brightness(small_frame)
-        logger.info(f"基准已建立。基准亮度: {self.baseline_brightness:.2f}")
+        
+        # 为每个 ROI 计算基线亮度
+        self.roi_baseline_brightness = []
+        for roi in self.rois:
+            roi_brightness = self._get_roi_brightness(gray, roi['sub_mask'])
+            self.roi_baseline_brightness.append(roi_brightness)
+        
+        logger.info(f"基准已建立。基准亮度: {self.baseline_brightness:.2f}, ROI 数量: {len(self.roi_baseline_brightness)}")
 
     def _reparse_rois(self):
         """重新解析 ROI 区域（在 mask 尺寸调整后调用）"""
@@ -116,10 +124,8 @@ class ImageProcessor:
                 self.mask = cv2.resize(self.mask, (645, 360), interpolation=cv2.INTER_NEAREST)
                 self._reparse_rois()
 
-            # 创建半透明遮罩层（非 ROI 区域变暗）
-            mask_overlay = np.zeros_like(small_frame)
-            mask_overlay[self.mask == 0] = [0, 0, 0]  # 非 ROI 区域变黑
-            vis_frame = cv2.addWeighted(vis_frame, 0.7, mask_overlay, 0.3, 0)
+            # 非 ROI 区域完全变黑（按规格书要求）
+            vis_frame[self.mask == 0] = [0, 0, 0]
 
         # 如果没有基线，只返回可视化图像
         if self.baseline is None:
@@ -127,7 +133,7 @@ class ImageProcessor:
             # 将 vis_frame resize 回原始尺寸用于显示
             h, w = frame.shape[:2]
             display_frame = cv2.resize(vis_frame, (w, h), interpolation=cv2.INTER_LINEAR)
-            return display_frame, False, 0, current_brightness
+            return display_frame, False, 0, current_brightness, []
 
         # 步骤2：检测 - 计算高斯模糊和差分
         gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
@@ -138,10 +144,14 @@ class ImageProcessor:
         # 步骤3：ROI 独立判断
         is_triggered = False
         total_diff_count = 0
+        triggered_indices = []
 
         if self.rois:
+            # 计算当前帧的灰度图
+            gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+            
             # 遍历每个 ROI 区域
-            for roi in self.rois:
+            for i, roi in enumerate(self.rois):
                 sub_mask = roi['sub_mask']
                 contour = roi['contour']
 
@@ -150,11 +160,18 @@ class ImageProcessor:
                 diff_count = cv2.countNonZero(roi_diff)
                 total_diff_count += diff_count
 
-                # 如果该 ROI 触发阈值
-                if diff_count > self.min_area:
+                # 检测该 ROI 的亮度变化
+                roi_has_brightness_change = False
+                if i < len(self.roi_baseline_brightness):
+                    current_roi_brightness = self._get_roi_brightness(gray, sub_mask)
+                    baseline_roi_brightness = self.roi_baseline_brightness[i]
+                    if abs(current_roi_brightness - baseline_roi_brightness) > self.threshold:
+                        roi_has_brightness_change = True
+
+                # 如果该 ROI 有亮度变化，标记为触发
+                if roi_has_brightness_change:
                     is_triggered = True
-                    # 在 vis_frame 上绘制该 ROI 的静态外轮廓（红色线条）
-                    cv2.drawContours(vis_frame, [contour], -1, (0, 0, 255), 2)
+                    triggered_indices.append(i)
         else:
             # 没有 ROI 时的全局检测
             total_diff_count = cv2.countNonZero(thresh)
@@ -167,7 +184,7 @@ class ImageProcessor:
         h, w = frame.shape[:2]
         display_frame = cv2.resize(vis_frame, (w, h), interpolation=cv2.INTER_LINEAR)
 
-        return display_frame, is_triggered, total_diff_count, current_brightness
+        return display_frame, is_triggered, total_diff_count, current_brightness, triggered_indices
 
     def get_current_brightness(self, frame):
         """Calculates mean brightness within the masked region."""
@@ -182,5 +199,19 @@ class ImageProcessor:
             mean_val = cv2.mean(gray)[0]
 
         return mean_val
+
+    def _get_roi_brightness(self, gray_frame, sub_mask):
+        """计算单个 ROI 区域的平均亮度"""
+        if gray_frame is None or sub_mask is None:
+            return 0
+        # 确保 mask 尺寸匹配
+        if sub_mask.shape != gray_frame.shape:
+            return 0
+        mean_val = cv2.mean(gray_frame, mask=sub_mask)[0]
+        return mean_val
+
+    def get_roi_contours(self):
+        """返回所有 ROI 的轮廓列表 (基于 645x360 坐标系)"""
+        return [roi['contour'] for roi in self.rois]
     
     

@@ -1135,3 +1135,39 @@ def process(self, frame):
 - 测试无基线时的遮罩可视化
 - 确认子线程处理不影响主线程性能
 - 验证 MQTT 上报功能正常
+
+### 2026-01-10 - 遮罩显示修复与 ROI 可视化优化
+
+#### 遮罩显示逻辑修复 (processor.py)
+- **问题**: 之前的半透明遮罩逻辑（`addWeighted`）导致非 ROI 区域仅轻微变暗，显示效果不明显，不符合规格书要求。
+- **修复**: 
+  - 改用直接像素赋值逻辑。
+  - 选择遮罩后，非 ROI 区域（mask=0）**完全全黑**，仅显示 ROI 区域（mask=255）的画面。
+  - 确保监控员能够专注于感兴趣区域。
+
+#### 独立 ROI 亮度监测 (processor.py)
+- **需求**: 每个独立的 ROI 区域需要单独监测亮度变化。
+- **实现**:
+  - `ImageProcessor` 在建立基准时，计算并存储每个独立 ROI 的基准亮度 (`roi_baseline_brightness`)。
+  - 在每帧处理时，计算每个 ROI 的当前亮度，并与各自的基准亮度进行对比。
+  - 当某个 ROI 亮度变化超过阈值时，标记该 ROI 为“触发状态”。
+
+#### ROI 可视化性能优化 (Table Mode) (widgets.py, processor.py, camera.py)
+- **背景**: 为了在低性能设备上流畅运行，避免在 OpenCV 图像处理层进行复杂的绘图操作（如 `drawContours`）。
+- **优化方案 (Table 模式)**:
+  1. **Processor**: 移除所有绘图逻辑，仅计算并返回**触发的 ROI 索引列表** (`triggered_indices`) 和 **ROI 轮廓数据**。
+  2. **CameraThread**: 通过 Signal 将 ROI 轮廓和触发索引传递给 UI 线程。
+  3. **UI Overlay (Qt)**: 
+     - 重写 `ImageDisplay` 的 `paintEvent`。
+     - 使用 `QPainter` 在视频图像之上绘制矢量红色圆环。
+     - 利用 GPU 加速的 Qt 绘图引擎，支持无损缩放和高性能渲染。
+- **效果**: 
+  - 大幅降低 CPU 占用（移除了每帧的像素级绘图）。
+  - 界面响应更流畅。
+  - 红圈显示更加清晰锐利，不受视频分辨率限制。
+
+#### 修改文件清单
+- `src/core/processor.py` - 遮罩逻辑修复、独立 ROI 亮度计算、移除绘图代码
+- `src/core/camera.py` - 信号更新，传递 ROI 数据
+- `src/gui/widgets.py` - 实现 UI 覆盖层绘图 (`paintEvent` 重写)
+- `src/gui/main_window.py` - 连接新的信号通路

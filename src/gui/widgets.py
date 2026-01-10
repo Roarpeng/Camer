@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import (QWidget, QLabel, QTextEdit, QVBoxLayout, 
                                QHBoxLayout, QCheckBox, QComboBox, QPushButton, 
                                QGroupBox, QFormLayout, QSlider, QLineEdit, QSpacerItem, QSizePolicy)
-from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QPolygon, QBrush
+from PySide6.QtCore import Qt, Signal, Slot, QPoint
 import os
 import sys
 
@@ -37,6 +37,9 @@ class ImageDisplay(QLabel):
             }
         """)
         self.alert_label.hide()  # 默认隐藏
+        
+        self.roi_contours = []  # 缓存的 ROI 轮廓 (原始 numpy 数组)
+        self.triggered_rois = set()  # 当前触发的 ROI 索引集合
 
     def set_alert(self, visible: bool):
         """控制报警标签的显示与隐藏"""
@@ -50,6 +53,62 @@ class ImageDisplay(QLabel):
     @Slot(object)
     def update_image(self, qt_image):
         self.setPixmap(QPixmap.fromImage(qt_image))
+        # 触发重绘以显示 ROI 覆盖层
+        self.update()
+
+    def set_rois(self, contours):
+        """设置 ROI 轮廓缓存"""
+        self.roi_contours = contours
+        self.triggered_rois = set()
+        self.update()
+
+    def update_triggered_rois(self, indices):
+        """更新当前触发的 ROI"""
+        if not indices:
+            self.triggered_rois = set()
+        else:
+            self.triggered_rois = set(indices)
+        self.update()
+
+    def paintEvent(self, event):
+        # 1. 绘制基础图像
+        super().paintEvent(event)
+        
+        # 2. 如果有触发的 ROI，绘制红色圆环
+        if self.roi_contours and self.triggered_rois:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            # 基础图像分辨率 (Processor 处理后的分辨率)
+            base_w, base_h = 645.0, 360.0
+            
+            # 计算缩放比例 (Label 尺寸 / 基础分辨率)
+            # 注意: setScaledContents(True) 会拉伸图像填满 Label，我们也需要同样拉伸坐标
+            scale_x = self.width() / base_w
+            scale_y = self.height() / base_h
+            
+            # 设置画笔
+            pen = QPen(QColor(255, 0, 0))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            
+            # 应用坐标变换
+            painter.scale(scale_x, scale_y)
+            
+            for idx in self.triggered_rois:
+                if 0 <= idx < len(self.roi_contours):
+                    contour = self.roi_contours[idx]
+                    # 转换 Numpy contour 到 QPolygon
+                    # contour shape is (N, 1, 2) -> (N, 2)
+                    points = []
+                    for pt in contour[:, 0, :]:
+                        points.append(QPoint(int(pt[0]), int(pt[1])))
+                    
+                    polygon = QPolygon(points)
+                    painter.drawPolygon(polygon)
+            
+            painter.end()
 
 
 class LogViewer(QWidget):
