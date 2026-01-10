@@ -13,10 +13,45 @@
     "cameras": [
         {
             "active": true,
-            "mask": "C:\\Users\\vboxuser\\Desktop\\Project\\Camer\\data\\1.png",
-            "threshold": 26,
+            "mask": "C:\\Users\\vboxuser\\Desktop\\Project\\Camer\\data\\2.png",
+            "threshold": 14,
             "min_area": 567,
             "scan_interval": 282
+        },
+        {
+            "active": false,
+            "mask": "",
+            "threshold": 50,
+            "min_area": 485,
+            "scan_interval": 279
+        },
+        {
+            "active": false,
+            "mask": "C:\\Users\\vboxuser\\Desktop\\Project\\Camer\\data\\2.png",
+            "threshold": 50,
+            "min_area": 500,
+            "scan_interval": 300
+        },
+        {
+            "active": false,
+            "mask": "",
+            "threshold": 50,
+            "min_area": 500,
+            "scan_interval": 300
+        },
+        {
+            "active": false,
+            "mask": "",
+            "threshold": 50,
+            "min_area": 500,
+            "scan_interval": 300
+        },
+        {
+            "active": false,
+            "mask": "",
+            "threshold": 50,
+            "min_area": 500,
+            "scan_interval": 300
         },
         {
             "active": false,

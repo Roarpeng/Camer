@@ -26,10 +26,10 @@ class MainWindow(QMainWindow):
         self.processors = []
         self.displays = []
         self.controls = []
-        self.need_baseline_flags = [False] * 3
-        self.last_scan_times = [0.0] * 3
-        self.brightness_reported_flags = [False] * 3
-        self.scan_intervals = [300] * 3  # 默认300ms
+        self.need_baseline_flags = [False] * 8
+        self.last_scan_times = [0.0] * 8
+        self.brightness_reported_flags = [False] * 8
+        self.scan_intervals = [300] * 8  # 默认300ms
         
         # 基线延时相关
         self.baseline_delay = 1000  # 默认延时1秒
@@ -55,7 +55,7 @@ class MainWindow(QMainWindow):
         self.init_logic()
         self.load_config()
         
-        app_logger.info("程序已初始化。三路摄像头支持已就绪。")
+        app_logger.info("程序已初始化。八路摄像头支持已就绪。")
 
     def init_ui(self):
         central_widget = QWidget()
@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
         self.mqtt_config = MqttConfigWidget()
         left_layout.addWidget(self.mqtt_config)
         
-        for i in range(3):
+        for i in range(8):
             ctrl = CameraControlWidget(i)
             self.controls.append(ctrl)
             left_layout.addWidget(ctrl)
@@ -97,7 +97,7 @@ class MainWindow(QMainWindow):
         center_widget = QWidget()
         center_layout = QVBoxLayout(center_widget)
         
-        for i in range(3):
+        for i in range(8):
             display = ImageDisplay()
             display.setText(f"摄像头 {i+1} 已关闭")
             self.displays.append(display)
@@ -121,20 +121,20 @@ class MainWindow(QMainWindow):
         # Logger signal
         self.log_handler.log_signal.connect(self.log_viewer.append_log)
         
-        for i in range(3):
+        for i in range(8):
             # Processor
             proc = ImageProcessor()
             self.processors.append(proc)
-            
+
             # Camera Thread
             cam = CameraThread(camera_index=i)
             self.cameras.append(cam)
-            
+
             # Connections
             # Use lambda with default argument to capture 'i' correctly in the loop
             cam.frame_received.connect(lambda frame, idx=i: self.process_frame(frame, idx))
             cam.error_occurred.connect(lambda err, idx=i: self.handle_camera_error(err, idx))
-            
+
             # Control Connections
             ctrl = self.controls[i]
             ctrl.activated.connect(lambda active, idx=i: self.toggle_camera(active, idx))
@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
         self.mqtt_config.slider_baseline_delay.blockSignals(False)
         
         # 加载摄像头配置
-        for i in range(3):
+        for i in range(8):
             cam_config = self.config_manager.get_camera_config(i)
             if cam_config:
                 ctrl = self.controls[i]
@@ -328,7 +328,7 @@ class MainWindow(QMainWindow):
             if (current_time - self.baseline_trigger_time) >= delay_sec:
                 self.baseline_pending = False
                 app_logger.info("延时完成，正在重置所有摄像头基准...")
-                for i in range(3):
+                for i in range(8):
                     self.on_reset_baseline(i)
 
         # 1. Update Baseline if requested

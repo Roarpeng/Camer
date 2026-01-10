@@ -39,6 +39,41 @@ class ConfigManager:
                     "threshold": 50,
                     "min_area": 500,
                     "scan_interval": 300
+                },
+                {
+                    "active": False,
+                    "mask": "",
+                    "threshold": 50,
+                    "min_area": 500,
+                    "scan_interval": 300
+                },
+                {
+                    "active": False,
+                    "mask": "",
+                    "threshold": 50,
+                    "min_area": 500,
+                    "scan_interval": 300
+                },
+                {
+                    "active": False,
+                    "mask": "",
+                    "threshold": 50,
+                    "min_area": 500,
+                    "scan_interval": 300
+                },
+                {
+                    "active": False,
+                    "mask": "",
+                    "threshold": 50,
+                    "min_area": 500,
+                    "scan_interval": 300
+                },
+                {
+                    "active": False,
+                    "mask": "",
+                    "threshold": 50,
+                    "min_area": 500,
+                    "scan_interval": 300
                 }
             ]
         }
