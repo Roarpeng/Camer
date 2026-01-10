@@ -58,7 +58,7 @@ class ImageProcessor:
         2. Check and resize mask to match small frame
         3. Diff against baseline (if baseline exists)
         4. Apply mask and threshold
-        Returns: (original_frame, is_triggered, diff_count, current_brightness)
+        Returns: (display_frame, is_triggered, diff_count, current_brightness)
         """
         # Only process if baseline has been established
         if self.baseline is None:
@@ -78,7 +78,7 @@ class ImageProcessor:
 
         # 第三步：使用 small_frame 进行计算
         gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
-        # 使用 11x11 核代替 21x21，性能提升约 70%
+        # 使用 11x11 核代替 21x11，性能提升约 70%
         blur = cv2.GaussianBlur(gray, (11, 11), 0)
 
         # 1. Absolute Difference
@@ -98,8 +98,17 @@ class ImageProcessor:
         # 5. 计算当前亮度（使用 small_frame）
         current_brightness = self.get_current_brightness(small_frame)
 
-        # 返回原始大图 frame（用于 UI 清晰显示），而不是 small_frame
-        return frame, is_triggered, diff_count, current_brightness
+        # 6. 准备显示图像
+        display_frame = frame.copy()
+        if self.mask is not None:
+            # 将 mask resize 到原始帧尺寸
+            h, w = frame.shape[:2]
+            display_mask = cv2.resize(self.mask, (w, h), interpolation=cv2.INTER_NEAREST)
+            # 应用 mask 到显示图像，非ROI区域变黑
+            display_frame = cv2.bitwise_and(display_frame, display_frame, mask=display_mask)
+
+        # 返回显示图像（有mask时显示叠加mask后的图像，无mask时显示原始图像）
+        return display_frame, is_triggered, diff_count, current_brightness
 
     def get_current_brightness(self, frame):
         """Calculates mean brightness within the masked region."""
