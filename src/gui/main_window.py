@@ -320,7 +320,7 @@ class MainWindow(QMainWindow):
     def process_frame(self, frame, idx):
         processor = self.processors[idx]
         display = self.displays[idx]
-        
+
         # 0. 检查延时基线建立（使用 currenttime - lasttime 逻辑）
         current_time = time.time()
         if self.baseline_pending:
@@ -330,36 +330,35 @@ class MainWindow(QMainWindow):
                 app_logger.info("延时完成，正在重置所有摄像头基准...")
                 for i in range(3):
                     self.on_reset_baseline(i)
-        
+
         # 1. Update Baseline if requested
         if self.need_baseline_flags[idx]:
             processor.set_baseline(frame)
             self.need_baseline_flags[idx] = False
-            
-        # 2. Process
-        vis_frame, is_triggered, diff_val = processor.process(frame)
-        
-        # 3. ROI Brightness Scan (使用配置的扫描间隔)
+
+        # 2. Process（现在返回亮度值，避免重复计算）
+        vis_frame, is_triggered, diff_val, current_brightness = processor.process(frame)
+
+        # 3. ROI Brightness Scan（使用处理器返回的亮度值，避免重复计算）
         scan_interval_sec = self.scan_intervals[idx] / 1000.0  # 转换为秒
         if (current_time - self.last_scan_times[idx]) >= scan_interval_sec:
             self.last_scan_times[idx] = current_time
             if processor.baseline_brightness is not None:
-                curr_brightness = processor.get_current_brightness(frame)
-                # 使用处理器的 threshold 参数作为亮度变化的阈值
-                if abs(curr_brightness - processor.baseline_brightness) > processor.threshold:
+                # 使用处理器返回的亮度值，避免重复的 cv2.cvtColor 和 cv2.mean
+                if abs(current_brightness - processor.baseline_brightness) > processor.threshold:
                     # 只在未上报过时才上报
                     if not self.brightness_reported_flags[idx]:
                         publish_topic = self.config_manager.get_publish_topic()
                         self.mqtt_worker.publish(publish_topic, "")
                         self.brightness_reported_flags[idx] = True
-                        app_logger.info(f"摄像头 {idx+1} 亮度变化触发上报：{curr_brightness:.2f} (基准: {processor.baseline_brightness:.2f})")
+                        app_logger.info(f"摄像头 {idx+1} 亮度变化触发上报：{current_brightness:.2f} (基准: {processor.baseline_brightness:.2f})")
 
         # 4. Display Image (Convert BGR to RGB to QImage)
         rgb_frame = cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
         bytes_per_line = ch * w
         q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        
+
         display.update_image(q_img)
 
     def closeEvent(self, event):
