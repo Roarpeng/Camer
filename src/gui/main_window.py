@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
     def init_logic(self):
         # Logger signal
         self.log_handler.log_signal.connect(self.log_viewer.append_log)
-        
+
         for i in range(8):
             # Processor
             proc = ImageProcessor()
@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
 
             # Connections
             # Use lambda with default argument to capture 'i' correctly in the loop
-            cam.frame_received.connect(lambda frame, idx=i: self.process_frame(frame, idx))
+            cam.processed_data_ready.connect(lambda frame, triggered, brightness, idx=i: self.update_camera_ui(frame, triggered, brightness, idx))
             cam.error_occurred.connect(lambda err, idx=i: self.handle_camera_error(err, idx))
 
             # Control Connections
@@ -316,8 +316,9 @@ class MainWindow(QMainWindow):
         self.brightness_reported_flags[idx] = False
         app_logger.info(f"摄像头 {idx+1} 基准重置请求已发送。")
 
-    @Slot(object, int)
-    def process_frame(self, frame, idx):
+    @Slot(object, bool, float, int)
+    def update_camera_ui(self, frame, is_triggered, current_brightness, idx):
+        """更新摄像头 UI，处理后的数据已在子线程中完成"""
         processor = self.processors[idx]
         display = self.displays[idx]
 
@@ -336,15 +337,15 @@ class MainWindow(QMainWindow):
             processor.set_baseline(frame)
             self.need_baseline_flags[idx] = False
 
-        # 2. Process（现在返回亮度值，避免重复计算）
-        vis_frame, is_triggered, diff_val, current_brightness = processor.process(frame)
+        # 2. 显示/隐藏报警标签
+        display.set_alert(is_triggered)
 
-        # 3. ROI Brightness Scan（使用处理器返回的亮度值，避免重复计算）
+        # 3. ROI Brightness Scan（使用传入的亮度值，避免重复计算）
         scan_interval_sec = self.scan_intervals[idx] / 1000.0  # 转换为秒
         if (current_time - self.last_scan_times[idx]) >= scan_interval_sec:
             self.last_scan_times[idx] = current_time
             if processor.baseline_brightness is not None:
-                # 使用处理器返回的亮度值，避免重复的 cv2.cvtColor 和 cv2.mean
+                # 使用传入的亮度值，避免重复计算
                 if abs(current_brightness - processor.baseline_brightness) > processor.threshold:
                     # 只在未上报过时才上报
                     if not self.brightness_reported_flags[idx]:
@@ -353,8 +354,9 @@ class MainWindow(QMainWindow):
                         self.brightness_reported_flags[idx] = True
                         app_logger.info(f"摄像头 {idx+1} 亮度变化触发上报：{current_brightness:.2f} (基准: {processor.baseline_brightness:.2f})")
 
-        # 4. Display Image (Convert BGR to RGB to QImage)
-        rgb_frame = cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB)
+        # 4. Display Image - Resize 到 645x360 与 mask 尺寸一致，方便观察 mask 遮盖效果
+        display_frame = cv2.resize(frame, (645, 360))
+        rgb_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
         bytes_per_line = ch * w
         q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)

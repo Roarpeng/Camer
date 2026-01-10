@@ -13,7 +13,7 @@
     "cameras": [
         {
             "active": true,
-            "mask": "C:\\Users\\vboxuser\\Desktop\\Project\\Camer\\data\\2.png",
+            "mask": "C:\\Users\\vboxuser\\Desktop\\Project\\Camer\\data\\1.png",
             "threshold": 14,
             "min_area": 567,
             "scan_interval": 282

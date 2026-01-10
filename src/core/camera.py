@@ -1,9 +1,11 @@
 import cv2
 from PySide6.QtCore import QThread, Signal
 import numpy as np
+from src.core.processor import ImageProcessor
 
 class CameraThread(QThread):
-    frame_received = Signal(np.ndarray)
+    frame_received = Signal(np.ndarray)  # 保留原信号用于兼容性
+    processed_data_ready = Signal(object, bool, float)  # 新信号：原图, 是否报警, 亮度值
     error_occurred = Signal(str)
 
     def __init__(self, camera_index=0):
@@ -11,6 +13,7 @@ class CameraThread(QThread):
         self.camera_index = camera_index
         self._running = True
         self.fps = 15  # 限制帧率为 15fps，足够监控使用，大幅降低 CPU 占用
+        self.processor = ImageProcessor()  # 实例化图像处理器
 
     def run(self):
         # Try to open with CAP_DSHOW first on Windows, then fallback
@@ -43,7 +46,11 @@ class CameraThread(QThread):
         while self._running:
             ret, frame = cap.read()
             if ret:
-                self.frame_received.emit(frame)
+                # 在子线程中进行图像处理，减轻主线程负担
+                processed_frame, is_triggered, diff_count, current_brightness = self.processor.process(frame)
+
+                # 发送处理后的数据到主线程
+                self.processed_data_ready.emit(processed_frame, is_triggered, current_brightness)
 
                 # 帧率控制：计算处理时间并休眠剩余时间
                 current_time = time.time()

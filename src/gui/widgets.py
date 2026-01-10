@@ -24,6 +24,29 @@ class ImageDisplay(QLabel):
         self.setMinimumSize(320, 240)
         self.setScaledContents(True)
 
+        # 新增报警标签 - 覆盖在画面左上角
+        self.alert_label = QLabel("⚠️ 报警提示", self)
+        self.alert_label.setStyleSheet("""
+            QLabel {
+                color: #FF4D4F;
+                font-size: 24px;
+                font-weight: bold;
+                background-color: transparent;
+                padding: 8px 12px;
+                border-radius: 4px;
+            }
+        """)
+        self.alert_label.hide()  # 默认隐藏
+
+    def set_alert(self, visible: bool):
+        """控制报警标签的显示与隐藏"""
+        if visible:
+            self.alert_label.show()
+            # 定位到左上角
+            self.alert_label.move(10, 10)
+        else:
+            self.alert_label.hide()
+
     @Slot(object)
     def update_image(self, qt_image):
         self.setPixmap(QPixmap.fromImage(qt_image))
